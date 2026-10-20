@@ -5,7 +5,5 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-gpui = "0.2.2"
-gpui-kit = "0.7.3"
+gpui-kit = "0.8.0"
 image = "0.25.10"
-

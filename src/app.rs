@@ -1,51 +1,31 @@
-use std::sync::Arc;
-
-use gpui_kit::component::button::*;
-use gpui_kit::component::*;
 use gpui_kit::*;
 
-const IMG_PATH: &str = "./test_photo.jpg";
+use crate::ui;
 
-pub struct ColorGrade {
-    image: Option<Arc<RenderImage>>,
-}
+pub struct ColorGradeApp;
 
-impl ColorGrade {
+impl ColorGradeApp {
     pub fn new() -> Self {
-        ColorGrade { image: None }
+        ColorGradeApp {}
     }
 
-    pub fn load_img(&mut self) {
-        let dyn_img =
-            image::open(IMG_PATH).expect(&format!("Failed to open the image at {IMG_PATH}"));
-        let rgba = dyn_img.to_rgba8();
-        let frame = image::Frame::new(rgba);
-        let rendered_frame = RenderImage::new(vec![frame]);
-        self.image = Some(Arc::new(rendered_frame));
-    }
-}
+    pub fn run(&self) {
+        gpui_kit::application().run(move |app| {
+            // This must be called before using any GPUI Component features.
+            gpui_kit::init(app);
 
-impl Render for ColorGrade {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        gpui_kit::div()
-            .v_flex()
-            .gap_2()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .child("Hello, World!")
-            .child(
-                Button::new("ok")
-                    .primary()
-                    .label("Let's Go!")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_img();
-                        cx.notify();
-                    })),
-            )
-            .child(match &self.image {
-                Some(i) => img(i.clone()).into_any_element(),
-                None => "Image not loaded".into_any_element(),
+            // Quit the app once the last window has been closed.
+            app.on_window_closed(|cx, _window_id| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
             })
+            .detach();
+
+            gpui_kit::open_window(WindowOptions::default(), app, |_window, app| {
+                app.new(|cx| ui::MainWindow::new(cx))
+            })
+            .expect("Failed to open window");
+        });
     }
 }
