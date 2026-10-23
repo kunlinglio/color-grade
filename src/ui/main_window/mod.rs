@@ -1,3 +1,4 @@
+mod event;
 mod explorer;
 mod monitor;
 mod nodes;
@@ -31,6 +32,22 @@ impl MainWindow {
         }
     }
 
+    fn init(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Make monitor subscribe the RenderPipe
+        let frame_stream = self.runtime.renderer.lock().unwrap().subscribe();
+        self.monitor.update(cx, |monitor, cx| {
+            monitor.start(window, cx, frame_stream);
+        });
+        // Make the RenderPipe subscribe the event from nodes
+        cx.subscribe(
+            &self.nodes,
+            |this, _nodes, _event: &event::RenderRequested, _cx| {
+                this.runtime.renderer.lock().unwrap().submit_render();
+            },
+        )
+        .detach();
+    }
+
     pub fn open(app: &mut App, runtime: Arc<ProjectRuntime>) {
         gpui_kit::open_window(
             WindowOptions {
@@ -53,7 +70,11 @@ impl MainWindow {
                 ..Default::default()
             },
             app,
-            |_window, app| app.new(|cx| MainWindow::new(cx, runtime)),
+            |window, app| {
+                let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime));
+                main_window_handler.update(app, |main_window, cx| main_window.init(window, cx));
+                main_window_handler
+            },
         )
         .expect("Failed to open MainWindow");
     }

@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-const IMG_PATH: &str = "./test_photo.jpg";
+use crate::render_pipe::FrameStream;
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
@@ -15,42 +14,52 @@ impl Monitor {
         Monitor { image: None }
     }
 
-    fn load_img(&mut self) {
-        let dyn_img =
-            image::open(IMG_PATH).expect(&format!("Failed to open the image at {IMG_PATH}"));
-        let mut rgba = dyn_img.to_rgba8();
-        // RenderImage stores pixels in BGRA order; swap R and B to match.
-        for pixel in rgba.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
+    /// Start to monitor the result from RenderPipe
+    pub fn start(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        mut frame_stream: FrameStream,
+    ) {
+        cx.spawn_in(window, async move |this, cx| {
+            while let Some(frame) = frame_stream.next_frame().await {
+                let _ = cx.update(|_window, app| {
+                    let _ = this.update(app, |monitor, cx| {
+                        monitor.apply_buffer(&frame.rgba, frame.width, frame.height);
+                        cx.notify();
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn apply_buffer(&mut self, rgba_buffer: &[u8], width: usize, height: usize) {
+        let mut bgra = rgba_buffer.to_vec();
+        // TODO: This is very expensive in the main thread, try to optimize it
+        for px in bgra.chunks_exact_mut(4) {
+            px.swap(0, 2);
         }
-        let frame = image::Frame::new(rgba);
-        let rendered_frame = RenderImage::new(vec![frame]);
-        self.image = Some(Arc::new(rendered_frame));
+        let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bgra)
+            .expect("renderer produced an invalid buffer size");
+        let frame = image::Frame::new(buffer);
+        self.image = Some(Arc::new(RenderImage::new(vec![frame])));
     }
 }
 
 impl Render for Monitor {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         gpui_kit::div()
             .v_flex()
             .size_full()
             .gap_2()
             .p_2()
-            .child(
-                Button::new("load-image")
-                    .primary()
-                    .label("Load Image")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_img();
-                        cx.notify();
-                    })),
-            )
             .child(match &self.image {
                 Some(i) => img(i.clone())
                     .size_full()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
-                None => "Image not loaded".into_any_element(),
+                None => "No Frame applied".into_any_element(),
             })
     }
 }
