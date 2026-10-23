@@ -2,25 +2,60 @@ mod explorer;
 mod monitor;
 mod nodes;
 
+use std::sync::Arc;
+
 use gpui_kit::component::*;
 use gpui_kit::*;
 
+use crate::project::ProjectRuntime;
+
 pub struct MainWindow {
+    // Views
     monitor: Entity<monitor::Monitor>,
     explorer: Entity<explorer::Explorer>,
     nodes: Entity<nodes::Nodes>,
+    // ProjectRuntime
+    runtime: Arc<ProjectRuntime>,
 }
 
 impl MainWindow {
-    pub fn new(self_cx: &mut Context<Self>) -> Self {
-        let monitor = self_cx.new(|_cx| monitor::Monitor::new());
-        let explorer = self_cx.new(|_cx| explorer::Explorer::new());
-        let nodes = self_cx.new(|_cx| nodes::Nodes::new());
+    fn new(cx: &mut Context<Self>, runtime: Arc<ProjectRuntime>) -> Self {
+        let monitor = cx.new(|_cx| monitor::Monitor::new());
+        let explorer = cx.new(|_cx| explorer::Explorer::new());
+        let nodes = cx.new(|_cx| nodes::Nodes::new());
         MainWindow {
             monitor,
             explorer,
             nodes,
+            runtime,
         }
+    }
+
+    pub fn open(app: &mut App, runtime: Arc<ProjectRuntime>) {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Maximized(Bounds {
+                    origin: Point {
+                        x: 0.0.into(),
+                        y: 0.0.into(),
+                    },
+                    size: gpui_kit::Size {
+                        height: 1080.0.into(),
+                        width: 1920.0.into(),
+                    },
+                })),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Color Grade".into()),
+                    // appears_transparent: true, // TODO: Support draw our owned title bar
+                    appears_transparent: false,
+                    traffic_light_position: None,
+                }),
+                ..Default::default()
+            },
+            app,
+            |_window, app| app.new(|cx| MainWindow::new(cx, runtime)),
+        )
+        .expect("Failed to open MainWindow");
     }
 }
 

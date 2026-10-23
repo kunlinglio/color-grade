@@ -1,10 +1,10 @@
-use std::path::PathBuf;
-
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-pub struct ProjectManagerWindow {}
+use crate::app::ColorGradeApp;
+
+pub struct ProjectManagerWindow;
 
 impl ProjectManagerWindow {
     fn new() -> Self {
@@ -13,16 +13,13 @@ impl ProjectManagerWindow {
     pub fn open(app: &mut App) -> Result<(AnyWindowHandle, Entity<Self>)> {
         gpui_kit::open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(Bounds {
-                    origin: Point {
-                        x: 100.0.into(),
-                        y: 100.0.into(),
-                    },
-                    size: gpui_kit::Size {
+                window_bounds: Some(WindowBounds::centered(
+                    gpui_kit::Size {
                         height: 300.0.into(),
                         width: 400.0.into(),
                     },
-                })),
+                    app,
+                )),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Color Grade Project Manager".into()),
                     // appears_transparent: true, // TODO: Support draw our owned title bar
@@ -32,11 +29,11 @@ impl ProjectManagerWindow {
                 ..Default::default()
             },
             app,
-            |_window, app| app.new(|_cx| ProjectManagerWindow::new()),
+            |_window: &mut Window, app| app.new(|_cx| ProjectManagerWindow::new()),
         )
     }
 
-    fn load_project(&self, window: &Window, cx: &mut Context<'_, Self>) {
+    fn load_project(&self, cx: &mut Context<'_, Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -44,7 +41,7 @@ impl ProjectManagerWindow {
             prompt: Some("Choose a folder for the new project".into()),
         });
 
-        cx.spawn_in(window, async move |_, cx| {
+        cx.spawn(async move |_window, cx| {
             let Ok(Ok(Some(paths))) = rx.await else {
                 return;
             };
@@ -52,8 +49,11 @@ impl ProjectManagerWindow {
                 return;
             };
 
-            cx.update(|_, app| println!("Opened the {} as a Project!", project_path.display()))
-                .ok();
+            cx.update(|app| {
+                ColorGradeApp::update_global(app, |cg_app, app| {
+                    cg_app.open_project(project_path, app);
+                });
+            });
         })
         .detach();
     }
@@ -71,8 +71,8 @@ impl Render for ProjectManagerWindow {
                 Button::new("load_project")
                     .primary()
                     .label("Load from a folder")
-                    .on_click(cx.listener(|this, _event, window, cx| {
-                        this.load_project(window, cx);
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.load_project(cx);
                     })),
             )
     }
