@@ -22,10 +22,14 @@ impl ColorGradeApp {
             })
             .detach();
 
-            gpui_kit::open_window(WindowOptions::default(), app, |_window, app| {
-                app.new(|cx| ui::MainWindow::new(cx))
-            })
-            .expect("Failed to open window");
+            ui::ProjectManagerWindow::open(app).expect("Failed to open Project Manager Window");
+
+            // Get focus on debug mod
+            // TODO: Make this configuratble
+            #[cfg(debug_assertions)]
+            {
+                app.activate(true);
+            }
         });
     }
 }

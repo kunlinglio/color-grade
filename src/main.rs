@@ -1,4 +1,6 @@
 mod app;
+mod project;
+mod render_pipe;
 mod ui;
 
 fn main() {
