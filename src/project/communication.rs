@@ -3,7 +3,7 @@
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 
-use crate::media::manager::MediaUpdater;
+use crate::media::communication::MediaUpdater;
 use crate::render_pipe::FrameStream;
 
 /// Communicate handler from the UI and the ProjectRuntime

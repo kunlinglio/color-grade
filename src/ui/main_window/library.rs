@@ -1,8 +1,9 @@
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::media::Media;
-use crate::media::manager::MediaUpdater;
+use crate::media;
+use crate::media::communication::MediaUpdater;
+use crate::media::media_type::Media;
 use crate::project::communication::ProjectRuntimeHandler;
 
 pub struct Library {
@@ -33,10 +34,17 @@ impl Library {
     /// Start to monitor the result from RenderPipe
     fn start(&mut self, window: &mut Window, cx: &mut Context<Self>, mut rx: MediaUpdater) {
         cx.spawn_in(window, async move |this, cx| {
-            while let Some(media) = rx.get().await {
+            while let Some(e) = rx.get().await {
                 let _ = cx.update(|_window, app| {
                     let _ = this.update(app, |this, cx| {
-                        this.media_list.push(media);
+                        match e {
+                            media::communication::Event::Sync(media_list) => {
+                                this.media_list = media_list;
+                            }
+                            media::communication::Event::Add(media) => {
+                                this.media_list.push(media);
+                            }
+                        }
                         cx.notify();
                     });
                 });

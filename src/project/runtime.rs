@@ -39,6 +39,7 @@ impl ProjectRuntime {
     pub fn run(mut self) -> (ProjectRuntimeThread, ProjectRuntimeHandler) {
         let (quit_tx, quit_rx) = oneshot::channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
+        self.media_manager.begin_scan();
         let handler = thread::spawn(move || self.main_loop(quit_rx, cmd_rx));
         (
             ProjectRuntimeThread {
@@ -65,7 +66,8 @@ impl ProjectRuntime {
                             Some(command) => { self.handle_command(command); }
                             None => break,
                         }
-                    }
+                    },
+                    _ = self.media_manager.handle_event().fuse() => {}
                 }
             }
         });
@@ -79,7 +81,7 @@ impl ProjectRuntime {
                 let _ = tx.send(frame_stream);
             }
             RequestMedias(tx) => {
-                let updater = self.media_manager.begin_scan();
+                let updater = self.media_manager.subscribe();
                 let _ = tx.send(updater);
             }
             WorkflowChanged => {

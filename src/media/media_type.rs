@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::media::hash::MediaHash;
+
 #[derive(Debug, Copy, Clone)]
 pub enum MediaKind {
     JPEG,
@@ -27,6 +29,7 @@ impl MediaKind {
 pub struct Media {
     pub path: PathBuf,
     pub kind: MediaKind,
+    pub hash: MediaHash,
 }
 
 impl Media {
@@ -37,6 +40,9 @@ impl Media {
         let Some(kind) = MediaKind::from_ext(ext) else {
             return None;
         };
-        Some(Media { path, kind })
+        let Ok(hash) = MediaHash::from_file(&path) else {
+            return None;
+        };
+        Some(Media { path, kind, hash })
     }
 }

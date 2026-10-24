@@ -1,3 +1,4 @@
+pub mod communication;
+pub mod hash;
 pub mod manager;
-mod media_type;
-pub use media_type::Media;
+pub mod media_type;
