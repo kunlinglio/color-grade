@@ -1,5 +1,5 @@
-use futures::channel::mpsc;
 use futures::StreamExt;
+use futures::channel::mpsc;
 
 pub trait RenderPipe {
     fn size(&self) -> (usize, usize);
@@ -7,20 +7,23 @@ pub trait RenderPipe {
     fn subscribe(&mut self) -> FrameStream;
 }
 
+const FILL_ODD: [u8; 4] = [128, 249, 134, 255];
+const FILL_EVEN: [u8; 4] = [10, 28, 134, 255];
+
 pub struct CPURenderPipe {
     width: usize,
     height: usize,
-    fill: [u8; 4], // RGBA
     senders: Vec<mpsc::UnboundedSender<Frame>>,
+    counter: usize,
 }
 
 impl CPURenderPipe {
-    pub fn new(width: usize, height: usize, fill: [u8; 4]) -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
         Self {
             width,
             height,
-            fill,
             senders: vec![],
+            counter: 0,
         }
     }
 }
@@ -31,9 +34,16 @@ impl RenderPipe for CPURenderPipe {
     }
 
     fn submit_render(&mut self) {
+        self.counter += 1;
         let mut buffer = vec![0u8; self.width * self.height * 4];
-        for pixel in buffer.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&self.fill);
+        if self.counter % 2 == 0 {
+            for pixel in buffer.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&FILL_EVEN);
+            }
+        } else {
+            for pixel in buffer.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&FILL_ODD);
+            }
         }
         let frame = Frame {
             width: self.width,
