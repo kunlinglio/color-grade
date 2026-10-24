@@ -40,18 +40,16 @@ impl Monitor {
     ) {
         cx.spawn_in(window, async move |this, cx| {
             while let Some(frame) = frame_stream.next_frame().await {
-                let _ = cx.update(|_window, app| {
-                    let _ = this.update(app, |monitor, cx| {
-                        monitor.apply_buffer(&frame.rgba, frame.width, frame.height);
-                        cx.notify();
-                    });
+                let _ = this.update_in(cx, |monitor, window, cx| {
+                    monitor.apply_buffer(window, &frame.rgba, frame.width, frame.height);
+                    cx.notify();
                 });
             }
         })
         .detach();
     }
 
-    fn apply_buffer(&mut self, rgba_buffer: &[u8], width: usize, height: usize) {
+    fn apply_buffer(&mut self, window: &mut Window, rgba_buffer: &[u8], width: usize, height: usize) {
         let mut bgra = rgba_buffer.to_vec();
         // TODO: This is very expensive in the main thread, try to optimize it
         for px in bgra.chunks_exact_mut(4) {
@@ -60,7 +58,13 @@ impl Monitor {
         let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bgra)
             .expect("renderer produced an invalid buffer size");
         let frame = image::Frame::new(buffer);
-        self.image = Some(Arc::new(RenderImage::new(vec![frame])));
+        let new_image = Arc::new(RenderImage::new(vec![frame]));
+        if let Some(previous) = self.image.replace(new_image) {
+            // `RenderImage::new` assigns a fresh id every frame, and `paint_image`
+            // uploads it to the window's sprite atlas, which never evicts tiles.
+            // Drop the previous image's tile or every rendered frame leaks GPU memory.
+            let _ = window.drop_image(previous);
+        }
     }
 }
 

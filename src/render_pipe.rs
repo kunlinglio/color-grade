@@ -58,6 +58,7 @@ impl RenderPipe for CPURenderPipe {
                 rgba: buffer,
             };
             for tx in &senders {
+                // Ignore the failure since the UI may quit before background tasks
                 let _ = tx.unbounded_send(frame.clone());
             }
         })

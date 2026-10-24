@@ -26,7 +26,8 @@ impl MediaManager {
 
         thread_pool.spawn(move || {
             recursive_scan(&root, &mut |media| {
-                tx.try_send(media).unwrap(); // FIXME: Remove this unwrap
+                // Ignore the failure since the UI may quit before background tasks
+                let _ = tx.try_send(media);
             });
         });
 

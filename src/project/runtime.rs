@@ -18,9 +18,9 @@ use super::communication::{Command, ProjectRuntimeHandler};
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
     project_path: PathBuf,
-    pub renderer: Box<dyn RenderPipe>,
+    renderer: Box<dyn RenderPipe>,
     thread_pool: Arc<ThreadPool>,
-    pub media_manager: MediaManager,
+    media_manager: MediaManager,
 }
 
 impl ProjectRuntime {
@@ -29,7 +29,7 @@ impl ProjectRuntime {
             Box::new(CPURenderPipe::new(1920, 1080, thread_pool.clone()));
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
         ProjectRuntime {
-            project_path: project_path,
+            project_path,
             renderer,
             thread_pool,
             media_manager,
@@ -72,14 +72,15 @@ impl ProjectRuntime {
     }
 
     fn handle_command(&mut self, cmd: Command) {
+        // Inside this method, we can ignore all the send/recv failure, since the runtime may lives longer than UI
         match cmd {
             SubscribeFrameStream(tx) => {
                 let frame_stream = self.renderer.subscribe();
-                tx.send(frame_stream).unwrap();
+                let _ = tx.send(frame_stream);
             }
             RequestMedias(tx) => {
                 let updater = self.media_manager.begin_scan();
-                tx.send(updater).unwrap();
+                let _ = tx.send(updater);
             }
             WorkflowChanged => {
                 self.renderer.submit_render();

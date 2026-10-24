@@ -17,21 +17,21 @@ impl ProjectRuntimeHandler {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeFrameStream(tx))
-            .unwrap();
-        let frame_stream = rx.await.expect("Project Runtime should not quit");
+            .expect("Project Runtime thread should not quit");
+        let frame_stream = rx.await.expect("Project Runtime thread should not quit");
         frame_stream
     }
     pub fn notify_workflow_changed(&mut self) {
         self.cmd_sender
             .unbounded_send(Command::WorkflowChanged)
-            .unwrap();
+            .expect("Project Runtime thread should not quit")
     }
     pub async fn request_media(&mut self) -> MediaUpdater {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::RequestMedias(tx))
-            .unwrap();
-        let media_updater = rx.await.unwrap();
+            .expect("Project Runtime thread should not quit");
+        let media_updater = rx.await.expect("Project Runtime thread should not quit");
         media_updater
     }
 }

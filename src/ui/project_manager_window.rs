@@ -11,29 +11,28 @@ impl ProjectManagerWindow {
         ProjectManagerWindow {}
     }
     pub fn open(app: &mut App) -> Result<(AnyWindowHandle, Entity<Self>)> {
-        gpui_kit::open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::centered(
-                    gpui_kit::Size {
-                        height: 300.0.into(),
-                        width: 400.0.into(),
-                    },
-                    app,
-                )),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Color Grade Project Manager".into()),
-                    // appears_transparent: true, // TODO: Support draw our owned title bar
-                    appears_transparent: false,
-                    traffic_light_position: None,
-                }),
-                ..Default::default()
-            },
-            app,
-            |_window: &mut Window, app| app.new(|_cx| ProjectManagerWindow::new()),
-        )
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(
+                gpui_kit::Size {
+                    height: 300.0.into(),
+                    width: 400.0.into(),
+                },
+                app,
+            )),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Color Grade Project Manager".into()),
+                // appears_transparent: true, // TODO: Support draw our owned title bar
+                appears_transparent: false,
+                traffic_light_position: None,
+            }),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, app, |_window: &mut Window, app| {
+            app.new(|_cx| ProjectManagerWindow::new())
+        })
     }
 
-    fn load_project(&self, cx: &mut Context<'_, Self>) {
+    fn open_project(&self, cx: &mut Context<'_, Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -72,7 +71,7 @@ impl Render for ProjectManagerWindow {
                     .primary()
                     .label("Load from a folder")
                     .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.load_project(cx);
+                        this.open_project(cx);
                     })),
             )
     }
