@@ -1,8 +1,9 @@
-use futures::channel::mpsc;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::media::Media;
+use crate::media::manager::MediaUpdater;
+use crate::project::communication::ProjectRuntimeHandler;
 
 pub struct Library {
     media_list: Vec<Media>,
@@ -13,15 +14,26 @@ impl Library {
         Library { media_list: vec![] }
     }
 
-    /// Start to monitor the result from RenderPipe
-    pub fn start(
-        &mut self,
-        window: &mut Window,
+    pub fn init(
+        &self,
         cx: &mut Context<Self>,
-        mut rx: mpsc::Receiver<Media>,
+        window: &mut Window,
+        mut runtime: ProjectRuntimeHandler,
     ) {
         cx.spawn_in(window, async move |this, cx| {
-            while let Ok(media) = rx.recv().await {
+            // Begin scanning media.
+            let media_rx = runtime.request_media().await;
+            let _ = this.update_in(cx, |library, window, cx| {
+                library.start(window, cx, media_rx);
+            });
+        })
+        .detach();
+    }
+
+    /// Start to monitor the result from RenderPipe
+    fn start(&mut self, window: &mut Window, cx: &mut Context<Self>, mut rx: MediaUpdater) {
+        cx.spawn_in(window, async move |this, cx| {
+            while let Some(media) = rx.get().await {
                 let _ = cx.update(|_window, app| {
                     let _ = this.update(app, |this, cx| {
                         this.media_list.push(media);

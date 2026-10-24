@@ -1,13 +1,17 @@
 use gpui_kit::component::button::*;
 use gpui_kit::*;
 
+use crate::project::communication::ProjectRuntimeHandler;
+
 use super::event;
 
-pub struct Nodes {}
+pub struct Nodes {
+    runtime: ProjectRuntimeHandler,
+}
 
 impl Nodes {
-    pub fn new() -> Self {
-        Nodes {}
+    pub fn new(runtime: ProjectRuntimeHandler) -> Self {
+        Nodes { runtime }
     }
 }
 
@@ -19,8 +23,8 @@ impl Render for Nodes {
             Button::new("test")
                 .primary()
                 .label("Render")
-                .on_click(cx.listener(|_this, _, _, cx| {
-                    cx.emit(event::RenderRequested);
+                .on_click(cx.listener(|this, _event, _win, _cx| {
+                    this.runtime.notify_workflow_changed();
                 })),
         )
     }

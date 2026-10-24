@@ -6,22 +6,22 @@ mod nodes;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::ProjectRuntime;
+use crate::project::communication::ProjectRuntimeHandler;
 
 pub struct MainWindow {
     // Views
     monitor: Entity<monitor::Monitor>,
     library: Entity<library::Library>,
     nodes: Entity<nodes::Nodes>,
-    // ProjectRuntime
-    runtime: ProjectRuntime,
+    /// Handler for communicating with ProjectRuntime
+    runtime: ProjectRuntimeHandler,
 }
 
 impl MainWindow {
-    fn new(cx: &mut Context<Self>, runtime: ProjectRuntime) -> Self {
+    fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let library = cx.new(|_cx| library::Library::new());
-        let nodes = cx.new(|_cx| nodes::Nodes::new());
+        let nodes = cx.new(|_cx| nodes::Nodes::new(runtime.clone()));
         MainWindow {
             monitor,
             library,
@@ -30,55 +30,42 @@ impl MainWindow {
         }
     }
 
-    fn init(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Make monitor subscribe the RenderPipe
-        let frame_stream = self.runtime.renderer.subscribe();
+    fn init<'a>(&mut self, window: &mut Window, cx: &mut Context<'a, Self>) {
         self.monitor.update(cx, |monitor, cx| {
-            monitor.start(window, cx, frame_stream);
+            monitor.init(cx, window, self.runtime.clone())
         });
-        // Make the RenderPipe subscribe the event from nodes
-        cx.subscribe(
-            &self.nodes,
-            |this, _nodes, _event: &event::RenderRequested, _cx| {
-                this.runtime.renderer.submit_render();
-            },
-        )
-        .detach();
-        // Begin scanning medias
-        let media_rx = self.runtime.media_manager.begin_scan();
         self.library.update(cx, |library, cx| {
-            library.start(window, cx, media_rx);
-        })
+            library.init(cx, window, self.runtime.clone())
+        });
     }
 
-    pub fn open(app: &mut App, runtime: ProjectRuntime) {
-        gpui_kit::open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Maximized(Bounds {
-                    origin: Point {
-                        x: 0.0.into(),
-                        y: 0.0.into(),
-                    },
-                    size: gpui_kit::Size {
-                        height: 1080.0.into(),
-                        width: 1920.0.into(),
-                    },
-                })),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Color Grade".into()),
-                    // appears_transparent: true, // TODO: Support draw our owned title bar
-                    appears_transparent: false,
-                    traffic_light_position: None,
-                }),
-                ..Default::default()
-            },
-            app,
-            |window, app| {
-                let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime));
-                main_window_handler.update(app, |main_window, cx| main_window.init(window, cx));
-                main_window_handler
-            },
-        )
+    pub fn open(app: &mut App, runtime: ProjectRuntimeHandler) {
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Maximized(Bounds {
+                origin: Point {
+                    x: 0.0.into(),
+                    y: 0.0.into(),
+                },
+                size: gpui_kit::Size {
+                    height: 1080.0.into(),
+                    width: 1920.0.into(),
+                },
+            })),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Color Grade".into()),
+                // appears_transparent: true, // TODO: Support draw our owned title bar
+                appears_transparent: false,
+                traffic_light_position: None,
+            }),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, app, |window, app| {
+            let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime));
+            main_window_handler.update(app, |main_window, cx| {
+                main_window.init(window, cx);
+            });
+            main_window_handler
+        })
         .expect("Failed to open MainWindow");
     }
 }

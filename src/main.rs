@@ -5,6 +5,7 @@ mod app;
 mod logger;
 mod media;
 mod project;
+mod project_manager;
 mod render_pipe;
 mod ui;
 
@@ -27,7 +28,7 @@ fn main() {
 
         ui::ProjectManagerWindow::open(app).expect("Failed to open Project Manager Window");
 
-        // Get focus on debug mod
+        // Get focus on debug mode
         // TODO: Make this configuratble
         #[cfg(debug_assertions)]
         {

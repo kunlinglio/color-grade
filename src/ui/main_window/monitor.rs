@@ -3,6 +3,7 @@ use std::sync::Arc;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
+use crate::project::communication::ProjectRuntimeHandler;
 use crate::render_pipe::FrameStream;
 
 pub struct Monitor {
@@ -14,8 +15,24 @@ impl Monitor {
         Monitor { image: None }
     }
 
+    pub fn init(
+        &self,
+        cx: &mut Context<Self>,
+        window: &mut Window,
+        mut runtime: ProjectRuntimeHandler,
+    ) {
+        cx.spawn_in(window, async move |this, cx| {
+            // Subscribe to the render stream.
+            let frame_stream = runtime.subscribe_frame_stream().await;
+            let _ = this.update_in(cx, |monitor, window, cx| {
+                monitor.start(window, cx, frame_stream);
+            });
+        })
+        .detach();
+    }
+
     /// Start to monitor the result from RenderPipe
-    pub fn start(
+    fn start(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,

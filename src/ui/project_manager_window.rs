@@ -4,7 +4,7 @@ use gpui_kit::*;
 
 use crate::app::ColorGradeApp;
 
-pub struct ProjectManagerWindow;
+pub struct ProjectManagerWindow {}
 
 impl ProjectManagerWindow {
     fn new() -> Self {

@@ -4,7 +4,7 @@ use futures::StreamExt;
 use futures::channel::mpsc;
 use rayon::ThreadPool;
 
-pub trait RenderPipe {
+pub trait RenderPipe: Send {
     /// Notify RenderPipe to draw a new frame
     fn submit_render(&mut self);
     fn subscribe(&mut self) -> FrameStream;
@@ -70,6 +70,7 @@ impl RenderPipe for CPURenderPipe {
     }
 }
 
+#[derive(Debug)]
 pub struct FrameStream {
     rx: mpsc::UnboundedReceiver<Frame>,
 }
