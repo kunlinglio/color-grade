@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use futures::StreamExt;
 use futures::channel::mpsc;
+use rayon::ThreadPool;
 
 pub trait RenderPipe {
-    fn size(&self) -> (usize, usize);
+    /// Notify RenderPipe to draw a new frame
     fn submit_render(&mut self);
     fn subscribe(&mut self) -> FrameStream;
 }
@@ -15,44 +18,49 @@ pub struct CPURenderPipe {
     height: usize,
     senders: Vec<mpsc::UnboundedSender<Frame>>,
     counter: usize,
+    thread_pool: Arc<ThreadPool>,
 }
 
 impl CPURenderPipe {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(width: usize, height: usize, thread_pool: Arc<ThreadPool>) -> Self {
         Self {
             width,
             height,
             senders: vec![],
             counter: 0,
+            thread_pool,
         }
     }
 }
 
 impl RenderPipe for CPURenderPipe {
-    fn size(&self) -> (usize, usize) {
-        (self.width, self.height)
-    }
-
     fn submit_render(&mut self) {
         self.counter += 1;
-        let mut buffer = vec![0u8; self.width * self.height * 4];
-        if self.counter % 2 == 0 {
-            for pixel in buffer.chunks_exact_mut(4) {
-                pixel.copy_from_slice(&FILL_EVEN);
+
+        let width = self.width;
+        let height = self.height;
+        let senders = self.senders.clone();
+        let counter = self.counter;
+        self.thread_pool.spawn(move || {
+            let mut buffer = vec![0u8; width * height * 4];
+            if counter % 2 == 0 {
+                for pixel in buffer.chunks_exact_mut(4) {
+                    pixel.copy_from_slice(&FILL_EVEN);
+                }
+            } else {
+                for pixel in buffer.chunks_exact_mut(4) {
+                    pixel.copy_from_slice(&FILL_ODD);
+                }
             }
-        } else {
-            for pixel in buffer.chunks_exact_mut(4) {
-                pixel.copy_from_slice(&FILL_ODD);
+            let frame = Frame {
+                width: width,
+                height: height,
+                rgba: buffer,
+            };
+            for tx in &senders {
+                let _ = tx.unbounded_send(frame.clone());
             }
-        }
-        let frame = Frame {
-            width: self.width,
-            height: self.height,
-            rgba: buffer,
-        };
-        for tx in &self.senders {
-            let _ = tx.unbounded_send(frame.clone());
-        }
+        })
     }
 
     fn subscribe(&mut self) -> FrameStream {

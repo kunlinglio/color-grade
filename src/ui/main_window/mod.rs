@@ -1,5 +1,5 @@
 mod event;
-mod explorer;
+mod library;
 mod monitor;
 mod nodes;
 
@@ -11,7 +11,7 @@ use crate::project::ProjectRuntime;
 pub struct MainWindow {
     // Views
     monitor: Entity<monitor::Monitor>,
-    explorer: Entity<explorer::Explorer>,
+    library: Entity<library::Library>,
     nodes: Entity<nodes::Nodes>,
     // ProjectRuntime
     runtime: ProjectRuntime,
@@ -20,11 +20,11 @@ pub struct MainWindow {
 impl MainWindow {
     fn new(cx: &mut Context<Self>, runtime: ProjectRuntime) -> Self {
         let monitor = cx.new(|_cx| monitor::Monitor::new());
-        let explorer = cx.new(|_cx| explorer::Explorer::new());
+        let library = cx.new(|_cx| library::Library::new());
         let nodes = cx.new(|_cx| nodes::Nodes::new());
         MainWindow {
             monitor,
-            explorer,
+            library,
             nodes,
             runtime,
         }
@@ -44,6 +44,11 @@ impl MainWindow {
             },
         )
         .detach();
+        // Begin scanning medias
+        let media_rx = self.runtime.media_manager.begin_scan();
+        self.library.update(cx, |library, cx| {
+            library.start(window, cx, media_rx);
+        })
     }
 
     pub fn open(app: &mut App, runtime: ProjectRuntime) {
@@ -80,13 +85,13 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, _window: &mut Window, _self_cx: &mut Context<Self>) -> impl IntoElement {
-        let explorer_panel = resizable_panel()
+        let library_panel = resizable_panel()
             .size_range(px(240.)..px(2400.))
-            .child(self.explorer.clone());
+            .child(self.library.clone());
         let monitor_panel = resizable_panel().child(self.monitor.clone());
         let nodes_panel = resizable_panel().child(self.nodes.clone());
         h_resizable("left-bottom-resizable-panel")
-            .child(explorer_panel)
+            .child(library_panel)
             .child(
                 resizable_panel().child(
                     v_resizable("top-horizontal")

@@ -1,11 +1,15 @@
 use crate::app::ColorGradeApp;
 
 mod app;
+#[macro_use]
+mod logger;
+mod media;
 mod project;
 mod render_pipe;
 mod ui;
 
 fn main() {
+    logger::init(logger::LogLevel::Debug);
     let cg_app = ColorGradeApp::new();
     gpui_kit::application().run(move |app| {
         // This must be called before using any GPUI Component features.
