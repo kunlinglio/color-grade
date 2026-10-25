@@ -9,15 +9,18 @@ use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
 use crate::render_pipe::{CPURenderPipe, RenderPipe};
+use crate::thumbnail::ThumbnailManager;
 
 use super::communication::{Command, ProjectRuntimeHandler};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
     project_path: PathBuf,
-    renderer: Box<dyn RenderPipe>,
     thread_pool: Arc<ThreadPool>,
+    // Services
+    renderer: Box<dyn RenderPipe>,
     media_manager: MediaManager,
+    thumbnail_manager: ThumbnailManager,
 }
 
 impl ProjectRuntime {
@@ -25,11 +28,13 @@ impl ProjectRuntime {
         let renderer: Box<dyn RenderPipe> =
             Box::new(CPURenderPipe::new(1920, 1080, thread_pool.clone()));
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
+        let thumbnail_manager = ThumbnailManager::new(thread_pool.clone());
         ProjectRuntime {
             project_path,
             renderer,
             thread_pool,
             media_manager,
+            thumbnail_manager,
         }
     }
 
@@ -37,7 +42,10 @@ impl ProjectRuntime {
         let (quit_tx, quit_rx) = oneshot::channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
         self.media_manager.issue_scan();
-        let handler = thread::spawn(move || self.main_loop(quit_rx, cmd_rx));
+        let handler = thread::Builder::new()
+            .name(format!("Project Runtime").to_string())
+            .spawn(move || self.main_loop(quit_rx, cmd_rx))
+            .expect("Create thread failed!");
         (
             ProjectRuntimeThread {
                 handler,
@@ -64,7 +72,8 @@ impl ProjectRuntime {
                             None => break,
                         }
                     },
-                    _ = self.media_manager.handle_event().fuse() => {}
+                    _ = self.media_manager.handle_event().fuse() => {},
+                    _ = self.thumbnail_manager.handle_event().fuse() => {}
                 }
             }
         });
@@ -83,6 +92,9 @@ impl ProjectRuntime {
             }
             Command::WorkflowChanged => {
                 self.renderer.submit_render();
+            }
+            Command::SubscribeThumbnails(tx) => {
+                let _ = tx.send(self.thumbnail_manager.subscribe());
             }
         }
     }

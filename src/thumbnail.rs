@@ -18,6 +18,18 @@ pub struct Thumbnail {
     rgba: Vec<u8>,
 }
 
+impl Thumbnail {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn rgba(&self) -> &[u8] {
+        &self.rgba
+    }
+}
+
 pub struct ThumbnailManager {
     cache: Arc<Mutex<LruCache<MediaHash, Arc<Thumbnail>>>>,
     thread_pool: Arc<ThreadPool>,
@@ -76,6 +88,7 @@ impl ThumbnailManager {
 }
 
 /// A client object to handle binary communication between UI and thumbnail manager
+#[derive(Clone)]
 pub struct ThumbnailManagerClient {
     tx: mpsc::UnboundedSender<(Media, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
 }
