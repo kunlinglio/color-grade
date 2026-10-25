@@ -8,9 +8,6 @@ use futures::channel::{mpsc, oneshot};
 use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
-use crate::project::communication::Command::{
-    RequestMedias, SubscribeFrameStream, WorkflowChanged,
-};
 use crate::render_pipe::{CPURenderPipe, RenderPipe};
 
 use super::communication::{Command, ProjectRuntimeHandler};
@@ -39,7 +36,7 @@ impl ProjectRuntime {
     pub fn run(mut self) -> (ProjectRuntimeThread, ProjectRuntimeHandler) {
         let (quit_tx, quit_rx) = oneshot::channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
-        self.media_manager.begin_scan();
+        self.media_manager.issue_scan();
         let handler = thread::spawn(move || self.main_loop(quit_rx, cmd_rx));
         (
             ProjectRuntimeThread {
@@ -76,15 +73,15 @@ impl ProjectRuntime {
     fn handle_command(&mut self, cmd: Command) {
         // Inside this method, we can ignore all the send/recv failure, since the runtime may lives longer than UI
         match cmd {
-            SubscribeFrameStream(tx) => {
+            Command::SubscribeFrameStream(tx) => {
                 let frame_stream = self.renderer.subscribe();
                 let _ = tx.send(frame_stream);
             }
-            RequestMedias(tx) => {
+            Command::RequestMedias(tx) => {
                 let updater = self.media_manager.subscribe();
                 let _ = tx.send(updater);
             }
-            WorkflowChanged => {
+            Command::WorkflowChanged => {
                 self.renderer.submit_render();
             }
         }

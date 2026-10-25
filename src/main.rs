@@ -7,6 +7,7 @@ mod media;
 mod project;
 mod project_manager;
 mod render_pipe;
+mod thumbnail;
 mod ui;
 
 fn main() {

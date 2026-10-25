@@ -73,6 +73,7 @@ impl RenderPipe for CPURenderPipe {
 
 #[derive(Debug)]
 pub struct FrameStream {
+    /// TODO: This may cause memory leak, use some machenism to only product latest frame
     rx: mpsc::UnboundedReceiver<Frame>,
 }
 

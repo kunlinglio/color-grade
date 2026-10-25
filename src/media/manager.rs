@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use futures::channel::mpsc;
 use rayon::ThreadPool;
@@ -21,6 +22,7 @@ pub struct MediaManager {
     /// Path -> Media
     media: HashMap<PathBuf, Media>,
     /// Sender for ui subscriber
+    /// TODO: Support remove subscribers
     ui_tx: Vec<mpsc::UnboundedSender<Event>>,
 }
 
@@ -49,7 +51,7 @@ impl MediaManager {
         MediaUpdater::new(rx)
     }
 
-    pub fn begin_scan(&self) {
+    pub fn issue_scan(&self) {
         let root = self.root.clone();
         let tx = self.scan_tx.clone();
         self.thread_pool.spawn(move || {
