@@ -4,7 +4,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::communication::ProjectRuntimeHandler;
-use crate::render_pipe::FrameStream;
+use crate::render_pipe::{Frame, FrameStream};
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
@@ -41,7 +41,7 @@ impl Monitor {
         cx.spawn_in(window, async move |this, cx| {
             while let Some(frame) = frame_stream.next_frame().await {
                 let _ = this.update_in(cx, |monitor, window, cx| {
-                    monitor.apply_buffer(window, &frame.rgba, frame.width, frame.height);
+                    monitor.apply_buffer(window, frame);
                     cx.notify();
                 });
             }
@@ -49,16 +49,8 @@ impl Monitor {
         .detach();
     }
 
-    fn apply_buffer(&mut self, window: &mut Window, rgba_buffer: &[u8], width: usize, height: usize) {
-        let mut bgra = rgba_buffer.to_vec();
-        // TODO: This is very expensive in the main thread, try to optimize it
-        for px in bgra.chunks_exact_mut(4) {
-            px.swap(0, 2);
-        }
-        let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bgra)
-            .expect("renderer produced an invalid buffer size");
-        let frame = image::Frame::new(buffer);
-        let new_image = Arc::new(RenderImage::new(vec![frame]));
+    fn apply_buffer(&mut self, window: &mut Window, frame: Arc<Frame>) {
+        let new_image = Arc::new(RenderImage::new(vec![image::Frame::new(frame.to_image())]));
         if let Some(previous) = self.image.replace(new_image) {
             // `RenderImage::new` assigns a fresh id every frame, and `paint_image`
             // uploads it to the window's sprite atlas, which never evicts tiles.

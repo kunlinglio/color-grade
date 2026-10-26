@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use image::RgbaImage;
 use rayon::ThreadPool;
 
 pub trait RenderPipe: Send {
@@ -64,11 +65,7 @@ impl RenderPipe for CPURenderPipe {
                     pixel.copy_from_slice(&FILL_ODD);
                 }
             }
-            let frame = Arc::new(Frame {
-                width: width,
-                height: height,
-                rgba: buffer,
-            });
+            let frame = Arc::new(Frame::from_rgba(width, height, buffer));
             let mut publish_gurad = publish.lock().unwrap();
             let latest = publish_gurad.version;
             if latest >= current {
@@ -103,7 +100,26 @@ impl FrameStream {
 
 #[derive(Clone)]
 pub struct Frame {
-    pub width: usize,
-    pub height: usize,
-    pub rgba: Vec<u8>,
+    width: usize,
+    height: usize,
+    bgra: Vec<u8>,
+}
+
+impl Frame {
+    pub fn from_rgba(width: usize, height: usize, rgba: Vec<u8>) -> Self {
+        assert_eq!(width * height * 4, rgba.len(), "RGBA buffer size mismatch");
+        let mut bgra = rgba.to_vec();
+        for px in bgra.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        Frame {
+            width,
+            height,
+            bgra,
+        }
+    }
+    pub fn to_image(&self) -> RgbaImage {
+        image::RgbaImage::from_raw(self.width as u32, self.height as u32, self.bgra.clone())
+            .unwrap()
+    }
 }

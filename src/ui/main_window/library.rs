@@ -9,7 +9,7 @@ use crate::media::communication::MediaSubscription;
 use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::project::communication::ProjectRuntimeHandler;
-use crate::thumbnail::{Thumbnail, ThumbnailManagerClient};
+use crate::thumbnail::ThumbnailManagerClient;
 
 pub struct Library {
     media_list: Vec<Media>,
@@ -98,7 +98,9 @@ fn spawn_thumbnail(
 ) {
     cx.spawn(async move |cx| {
         if let Some(thumb) = client.request(media.clone()).await {
-            let image = thumbnail_to_render_image(thumb.as_ref());
+            let image = Arc::new(RenderImage::new(vec![image::Frame::new(
+                thumb.frame.to_image(),
+            )]));
             let hash = media.hash;
             let _ = cx.update(|_, app| {
                 let _ = this.update(app, |library, cx| {
@@ -109,18 +111,6 @@ fn spawn_thumbnail(
         }
     })
     .detach();
-}
-
-/// Convert a data-layer thumbnail (RGBA) into a GPUI displayable image (BGRA).
-/// TODO: Remove this expensive prosedure to the worker
-fn thumbnail_to_render_image(thumb: &Thumbnail) -> Arc<RenderImage> {
-    let mut bgra = thumb.rgba().to_vec();
-    for px in bgra.chunks_exact_mut(4) {
-        px.swap(0, 2);
-    }
-    let buf = image::RgbaImage::from_raw(thumb.width(), thumb.height(), bgra)
-        .expect("thumbnail produced an invalid buffer size");
-    Arc::new(RenderImage::new(vec![image::Frame::new(buf)]))
 }
 
 impl Render for Library {
