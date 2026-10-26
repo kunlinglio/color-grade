@@ -52,7 +52,7 @@ impl ThumbnailManager {
         }
     }
 
-    pub fn subscribe(&self) -> ThumbnailManagerClient {
+    pub fn client(&self) -> ThumbnailManagerClient {
         ThumbnailManagerClient {
             tx: self.client_tx.clone(),
         }

@@ -8,13 +8,13 @@ pub enum Event {
 }
 
 #[derive(Debug)]
-pub struct MediaUpdater {
+pub struct MediaSubscription {
     rx: mpsc::UnboundedReceiver<Event>,
 }
 
-impl MediaUpdater {
+impl MediaSubscription {
     pub fn new(rx: mpsc::UnboundedReceiver<Event>) -> Self {
-        MediaUpdater { rx }
+        MediaSubscription { rx }
     }
     pub async fn get(&mut self) -> Option<Event> {
         self.rx.recv().await.ok()

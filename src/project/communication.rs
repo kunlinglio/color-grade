@@ -3,7 +3,7 @@
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 
-use crate::media::communication::MediaUpdater;
+use crate::media::communication::MediaSubscription;
 use crate::render_pipe::FrameStream;
 use crate::thumbnail::ThumbnailManagerClient;
 
@@ -27,10 +27,10 @@ impl ProjectRuntimeHandler {
             .unbounded_send(Command::WorkflowChanged)
             .expect("Project Runtime thread should not quit")
     }
-    pub async fn request_media(&mut self) -> MediaUpdater {
+    pub async fn request_media(&mut self) -> MediaSubscription {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
-            .unbounded_send(Command::RequestMedias(tx))
+            .unbounded_send(Command::SubscribeMedia(tx))
             .expect("Project Runtime thread should not quit");
         let media_updater = rx.await.expect("Project Runtime thread should not quit");
         media_updater
@@ -38,7 +38,7 @@ impl ProjectRuntimeHandler {
     pub async fn subscribe_thumbnails(&mut self) -> ThumbnailManagerClient {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
-            .unbounded_send(Command::SubscribeThumbnails(tx))
+            .unbounded_send(Command::ReqThumbnailClient(tx))
             .expect("Project Runtime thread should not quit");
         rx.await.expect("Project Runtime thread should not quit")
     }
@@ -47,8 +47,8 @@ impl ProjectRuntimeHandler {
 pub enum Command {
     // Request commands: Bringing a Sender
     SubscribeFrameStream(oneshot::Sender<FrameStream>),
-    RequestMedias(oneshot::Sender<MediaUpdater>),
-    SubscribeThumbnails(oneshot::Sender<ThumbnailManagerClient>),
+    SubscribeMedia(oneshot::Sender<MediaSubscription>),
+    ReqThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
     // Notify commands
     WorkflowChanged,
 }

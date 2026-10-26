@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use futures::channel::mpsc;
 use rayon::ThreadPool;
 
-use crate::media::communication::{Event, MediaUpdater};
+use crate::media::communication::{Event, MediaSubscription};
 
 use super::media_type::Media;
 
@@ -39,7 +38,7 @@ impl MediaManager {
         }
     }
 
-    pub fn subscribe(&mut self) -> MediaUpdater {
+    pub fn subscribe(&mut self) -> MediaSubscription {
         let (tx, rx) = mpsc::unbounded();
         let mut media_list = vec![];
         for v in self.media.values() {
@@ -48,7 +47,7 @@ impl MediaManager {
         tx.unbounded_send(Event::Sync(media_list)).unwrap();
         self.ui_tx.push(tx);
 
-        MediaUpdater::new(rx)
+        MediaSubscription::new(rx)
     }
 
     pub fn issue_scan(&self) {

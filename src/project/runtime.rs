@@ -86,15 +86,15 @@ impl ProjectRuntime {
                 let frame_stream = self.renderer.subscribe();
                 let _ = tx.send(frame_stream);
             }
-            Command::RequestMedias(tx) => {
+            Command::SubscribeMedia(tx) => {
                 let updater = self.media_manager.subscribe();
                 let _ = tx.send(updater);
             }
             Command::WorkflowChanged => {
                 self.renderer.submit_render();
             }
-            Command::SubscribeThumbnails(tx) => {
-                let _ = tx.send(self.thumbnail_manager.subscribe());
+            Command::ReqThumbnailClient(tx) => {
+                let _ = tx.send(self.thumbnail_manager.client());
             }
         }
     }

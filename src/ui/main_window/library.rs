@@ -5,7 +5,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::media;
-use crate::media::communication::MediaUpdater;
+use crate::media::communication::MediaSubscription;
 use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::project::communication::ProjectRuntimeHandler;
@@ -46,7 +46,7 @@ impl Library {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        mut rx: MediaUpdater,
+        mut rx: MediaSubscription,
         thumbnail_client: ThumbnailManagerClient,
     ) {
         cx.spawn_in(window, async move |this, cx| {
