@@ -6,7 +6,7 @@ mod logger;
 mod media;
 mod project;
 mod project_manager;
-mod render_pipe;
+mod render;
 mod thumbnail;
 mod ui;
 

@@ -1,10 +1,12 @@
 //! Defined the communication between the project runtime and UI
 
+use std::path::{Path, PathBuf};
+
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 
 use crate::media::comm::MediaSubscription;
-use crate::render_pipe::FrameStream;
+use crate::render::FrameStream;
 use crate::thumbnail::ThumbnailManagerClient;
 
 /// Communicate handler from the UI and the ProjectRuntime
@@ -27,7 +29,7 @@ impl ProjectRuntimeHandler {
             .unbounded_send(Command::WorkflowChanged)
             .expect("Project Runtime thread should not quit")
     }
-    pub async fn request_media(&mut self) -> MediaSubscription {
+    pub async fn listen_on_media(&mut self) -> MediaSubscription {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeMedia(tx))
@@ -42,6 +44,11 @@ impl ProjectRuntimeHandler {
             .expect("Project Runtime thread should not quit");
         rx.await.expect("Project Runtime thread should not quit")
     }
+    pub fn open_media(&self, path: &Path) {
+        self.cmd_sender
+            .unbounded_send(Command::OpenMedia(path.to_path_buf()))
+            .expect("Project Runtime thread should not quit")
+    }
 }
 
 pub enum Command {
@@ -51,4 +58,7 @@ pub enum Command {
     ReqThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
     // Notify commands
     WorkflowChanged,
+    /// Open a new media.
+    /// NOTE: This will discard old media
+    OpenMedia(PathBuf),
 }

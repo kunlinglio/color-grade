@@ -8,13 +8,13 @@ use rayon::ThreadPool;
 
 use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
-use crate::render_pipe::Frame;
+use crate::render::RenderedFrame;
 
 const THUMBNAIL_HEIGHT: usize = 256;
 const CACHE_CAPACITY: usize = 256;
 
 pub struct Thumbnail {
-    pub frame: Frame,
+    pub frame: RenderedFrame,
 }
 
 pub struct ThumbnailManager {
@@ -106,6 +106,6 @@ fn load_thumbnail(media: &Media) -> anyhow::Result<Thumbnail> {
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
     Ok(Thumbnail {
-        frame: Frame::from_rgba(width as usize, height as usize, rgba.to_vec()),
+        frame: RenderedFrame::from_rgba(width as usize, height as usize, rgba.to_vec()),
     })
 }

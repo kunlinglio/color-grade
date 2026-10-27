@@ -8,28 +8,29 @@ use futures::channel::{mpsc, oneshot};
 use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
-use crate::render_pipe::{CPURenderPipe, RenderPipe};
+use crate::project::editable::Editable;
+use crate::render::Renderer;
+use crate::render::cpu::CPURenderer;
 use crate::thumbnail::ThumbnailManager;
 
 use super::comm::{Command, ProjectRuntimeHandler};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
-    project_path: PathBuf,
+    opened: Option<Editable>,
     // Services
-    renderer: Box<dyn RenderPipe>,
+    renderer: Box<dyn Renderer>,
     media_manager: MediaManager,
     thumbnail_manager: ThumbnailManager,
 }
 
 impl ProjectRuntime {
     pub fn new(project_path: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let renderer: Box<dyn RenderPipe> =
-            Box::new(CPURenderPipe::new(1920, 1080, thread_pool.clone()));
+        let renderer: Box<dyn Renderer> = Box::new(CPURenderer::new(thread_pool.clone()));
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
         let thumbnail_manager = ThumbnailManager::new(thread_pool.clone());
         ProjectRuntime {
-            project_path,
+            opened: None,
             renderer,
             media_manager,
             thumbnail_manager,
@@ -88,11 +89,23 @@ impl ProjectRuntime {
                 let updater = self.media_manager.subscribe();
                 let _ = tx.send(updater);
             }
-            Command::WorkflowChanged => {
-                self.renderer.submit_render();
-            }
             Command::ReqThumbnailClient(tx) => {
                 let _ = tx.send(self.thumbnail_manager.client());
+            }
+            Command::WorkflowChanged => {
+                if let Some(editable) = &self.opened {
+                    self.renderer
+                        .render(editable.gen_render_list(), editable.get_decoded());
+                }
+            }
+            Command::OpenMedia(path) => {
+                let Ok(editable) = Editable::new(path.clone()) else {
+                    error!("Failed to open media at {}", path.display());
+                    return;
+                };
+                self.renderer
+                    .render(editable.gen_render_list(), editable.get_decoded());
+                self.opened = Some(editable);
             }
         }
     }
@@ -106,7 +119,7 @@ pub struct ProjectRuntimeThread {
 impl ProjectRuntimeThread {
     pub fn quit(self) {
         let _ = self.quit_sender.send(());
-        if let Err(e) = self.handler.join() {
+        if let Err(_) = self.handler.join() {
             error!("ProjectRuntime thread panicked during shutdown!")
         }
     }

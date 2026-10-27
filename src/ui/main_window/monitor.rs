@@ -4,7 +4,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
-use crate::render_pipe::{Frame, FrameStream};
+use crate::render::{FrameStream, RenderedFrame};
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
@@ -49,7 +49,7 @@ impl Monitor {
         .detach();
     }
 
-    fn apply_buffer(&mut self, window: &mut Window, frame: Arc<Frame>) {
+    fn apply_buffer(&mut self, window: &mut Window, frame: Arc<RenderedFrame>) {
         let new_image = Arc::new(RenderImage::new(vec![image::Frame::new(frame.to_image())]));
         if let Some(previous) = self.image.replace(new_image) {
             // `RenderImage::new` assigns a fresh id every frame, and `paint_image`

@@ -14,13 +14,17 @@ use crate::thumbnail::ThumbnailManagerClient;
 pub struct Library {
     media_list: Vec<Media>,
     thumbnails: HashMap<MediaHash, Arc<RenderImage>>,
+    runtime: ProjectRuntimeHandler,
+    selected: Option<MediaHash>,
 }
 
 impl Library {
-    pub fn new() -> Self {
+    pub fn new(runtime: ProjectRuntimeHandler) -> Self {
         Library {
             media_list: vec![],
             thumbnails: HashMap::new(),
+            runtime,
+            selected: None,
         }
     }
 
@@ -32,7 +36,7 @@ impl Library {
     ) {
         cx.spawn_in(window, async move |this, cx| {
             // Begin scanning media.
-            let media_rx = runtime.request_media().await;
+            let media_rx = runtime.listen_on_media().await;
             let thumbnail_client = runtime.subscribe_thumbnails().await;
             let _ = this.update_in(cx, |library, window, cx| {
                 library.start(window, cx, media_rx, thumbnail_client);
@@ -114,9 +118,12 @@ fn spawn_thumbnail(
 }
 
 impl Render for Library {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let medias = self.media_list.clone();
         let thumbnails = self.thumbnails.clone();
+        let runtime = self.runtime.clone();
+        let selected = self.selected;
+        let this = cx.weak_entity();
         div()
             .v_flex()
             .size_full()
@@ -132,9 +139,21 @@ impl Render for Library {
                                 .file_name()
                                 .map(|s| s.to_string_lossy().into_owned())
                                 .unwrap_or_default();
+                            let is_selected = selected == Some(media.hash);
+                            let path = media.path.clone();
+                            let hash = media.hash;
+                            let runtime = runtime.clone();
+                            let this = this.clone();
 
-                            div()
+                            let mut item = div()
                                 .id(i)
+                                .on_click(move |_event, _window, app| {
+                                    let _ = this.update(app, |library, cx| {
+                                        library.selected = Some(hash);
+                                        cx.notify();
+                                    });
+                                    runtime.open_media(&path);
+                                })
                                 .h(px(200.0))
                                 .v_flex()
                                 .p_2()
@@ -151,7 +170,12 @@ impl Render for Library {
                                         .child(text!("..."))
                                         .into_any_element(),
                                 })
-                                .child(div().w_full().flex().justify_center().child(file_name))
+                                .child(div().w_full().flex().justify_center().child(file_name));
+
+                            if is_selected {
+                                item = item.bg(rgba(0x3b82f6_33));
+                            }
+                            item
                         })
                         .collect()
                 })

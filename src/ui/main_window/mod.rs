@@ -30,7 +30,7 @@ impl MainWindow {
         .detach();
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
-        let library = cx.new(|_cx| library::Library::new());
+        let library = cx.new(|_cx| library::Library::new(runtime.clone()));
         let nodes = cx.new(|_cx| nodes::Nodes::new(runtime.clone()));
         MainWindow {
             monitor,
