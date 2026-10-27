@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::communication::ProjectRuntimeHandler;
+use crate::project::comm::ProjectRuntimeHandler;
 use crate::render_pipe::{Frame, FrameStream};
 
 pub struct Monitor {

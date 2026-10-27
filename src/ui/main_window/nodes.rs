@@ -1,7 +1,7 @@
 use gpui_kit::component::button::*;
 use gpui_kit::*;
 
-use crate::project::communication::ProjectRuntimeHandler;
+use crate::project::comm::ProjectRuntimeHandler;
 
 use super::event;
 

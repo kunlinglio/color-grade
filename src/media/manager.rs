@@ -6,7 +6,7 @@ use std::sync::Arc;
 use futures::channel::mpsc;
 use rayon::ThreadPool;
 
-use crate::media::communication::{Event, MediaSubscription};
+use crate::media::comm::{Event, MediaSubscription};
 
 use super::media_type::Media;
 

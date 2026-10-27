@@ -5,10 +5,10 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::media;
-use crate::media::communication::MediaSubscription;
+use crate::media::comm::MediaSubscription;
 use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
-use crate::project::communication::ProjectRuntimeHandler;
+use crate::project::comm::ProjectRuntimeHandler;
 use crate::thumbnail::ThumbnailManagerClient;
 
 pub struct Library {
@@ -52,7 +52,7 @@ impl Library {
         cx.spawn_in(window, async move |this, cx| {
             while let Some(e) = rx.get().await {
                 match e {
-                    media::communication::Event::Sync(list) => {
+                    media::comm::Event::Sync(list) => {
                         for media in &list {
                             spawn_thumbnail(
                                 this.clone(),
@@ -68,7 +68,7 @@ impl Library {
                             });
                         });
                     }
-                    media::communication::Event::Add(media) => {
+                    media::comm::Event::Add(media) => {
                         spawn_thumbnail(
                             this.clone(),
                             cx.clone(),

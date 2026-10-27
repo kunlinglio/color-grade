@@ -3,7 +3,7 @@
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 
-use crate::media::communication::MediaSubscription;
+use crate::media::comm::MediaSubscription;
 use crate::render_pipe::FrameStream;
 use crate::thumbnail::ThumbnailManagerClient;
 

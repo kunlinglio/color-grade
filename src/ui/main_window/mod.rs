@@ -6,7 +6,7 @@ mod nodes;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::communication::ProjectRuntimeHandler;
+use crate::project::comm::ProjectRuntimeHandler;
 
 pub struct MainWindow {
     // Views

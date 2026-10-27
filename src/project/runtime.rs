@@ -11,7 +11,7 @@ use crate::media::manager::MediaManager;
 use crate::render_pipe::{CPURenderPipe, RenderPipe};
 use crate::thumbnail::ThumbnailManager;
 
-use super::communication::{Command, ProjectRuntimeHandler};
+use super::comm::{Command, ProjectRuntimeHandler};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
