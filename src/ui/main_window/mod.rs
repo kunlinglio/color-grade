@@ -1,4 +1,3 @@
-mod event;
 mod library;
 mod monitor;
 mod nodes;
@@ -31,7 +30,7 @@ impl MainWindow {
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let library = cx.new(|_cx| library::Library::new(runtime.clone()));
-        let nodes = cx.new(|_cx| nodes::Nodes::new(runtime.clone()));
+        let nodes = cx.new(|cx| nodes::Nodes::new(cx, runtime.clone()));
         MainWindow {
             monitor,
             library,

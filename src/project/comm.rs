@@ -24,9 +24,15 @@ impl ProjectRuntimeHandler {
         let frame_stream = rx.await.expect("Project Runtime thread should not quit");
         frame_stream
     }
-    pub fn notify_workflow_changed(&mut self) {
+    pub fn set_brightness(&self, brightness: f32) {
         self.cmd_sender
-            .unbounded_send(Command::WorkflowChanged)
+            .unbounded_send(Command::SetBrightness(brightness))
+            .expect("Project Runtime thread should not quit")
+    }
+
+    pub fn set_saturation(&self, saturation: f32) {
+        self.cmd_sender
+            .unbounded_send(Command::SetSaturation(saturation))
             .expect("Project Runtime thread should not quit")
     }
     pub async fn listen_on_media(&mut self) -> MediaSubscription {
@@ -57,7 +63,8 @@ pub enum Command {
     SubscribeMedia(oneshot::Sender<MediaSubscription>),
     ReqThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
     // Notify commands
-    WorkflowChanged,
+    SetBrightness(f32),
+    SetSaturation(f32),
     /// Open a new media.
     /// NOTE: This will discard old media
     OpenMedia(PathBuf),

@@ -78,6 +78,13 @@ impl ProjectRuntime {
         });
     }
 
+    fn re_render_current(&self) {
+        if let Some(session) = &self.opened {
+            self.renderer
+                .render(session.gen_render_list(), session.get_decoded());
+        }
+    }
+
     fn handle_command(&mut self, cmd: Command) {
         // Inside this method, we can ignore all the send/recv failure, since the runtime may lives longer than UI
         match cmd {
@@ -92,11 +99,17 @@ impl ProjectRuntime {
             Command::ReqThumbnailClient(tx) => {
                 let _ = tx.send(self.thumbnail_manager.client());
             }
-            Command::WorkflowChanged => {
-                if let Some(editable) = &self.opened {
-                    self.renderer
-                        .render(editable.gen_render_list(), editable.get_decoded());
+            Command::SetBrightness(brightness) => {
+                if let Some(session) = &mut self.opened {
+                    session.set_brightness(brightness);
                 }
+                self.re_render_current();
+            }
+            Command::SetSaturation(saturation) => {
+                if let Some(session) = &mut self.opened {
+                    session.set_saturation(saturation);
+                }
+                self.re_render_current();
             }
             Command::OpenMedia(path) => {
                 let Ok(editable) = EditSession::new(path.clone()) else {
