@@ -14,10 +14,10 @@ impl Nodes {
     pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
         let brightness = cx.new(|_| {
             SliderState::new()
-                .min(-2.0)
+                .min(0.0)
                 .max(2.0)
                 .step(0.01)
-                .default_value(0.0)
+                .default_value(1.0)
         });
         let saturation = cx.new(|_| {
             SliderState::new()

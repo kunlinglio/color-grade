@@ -27,9 +27,11 @@ impl CPURenderer {
         for op in list.ops {
             match op {
                 Op::Brightness(b) => {
-                    let factor = f32::exp(b);
-                    for e in &mut buffer.rgba {
-                        *e *= factor;
+                    let factor = b.max(0.0);
+                    for px in buffer.rgba.chunks_exact_mut(4) {
+                        px[0] *= factor;
+                        px[1] *= factor;
+                        px[2] *= factor;
                     }
                 }
                 Op::Saturation(s) => {
@@ -53,12 +55,14 @@ impl Renderer for CPURenderer {
         self.thread_pool.spawn(move || {
             let latest = publish.lock().unwrap().version;
             if latest >= current {
+                debug!("Renderer quit before computing, the task is outdate.");
                 return;
             }
             let frame = CPURenderer::handle_render(list, from);
             let mut publish_gurad = publish.lock().unwrap();
             let latest = publish_gurad.version;
             if latest >= current {
+                debug!("Renderer quit after computing, the task is outdate.");
                 return;
             }
             publish_gurad.version = current;

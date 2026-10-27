@@ -52,7 +52,7 @@ pub struct WorkFlow {
 impl Default for WorkFlow {
     fn default() -> Self {
         WorkFlow {
-            brightness: 0.0,
+            brightness: 1.0,
             saturation: 1.0,
         }
     }
