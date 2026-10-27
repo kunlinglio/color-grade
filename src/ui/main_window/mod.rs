@@ -3,9 +3,12 @@ mod library;
 mod monitor;
 mod nodes;
 
+use std::path::PathBuf;
+
 use gpui_kit::component::*;
 use gpui_kit::*;
 
+use crate::app::ColorGradeApp;
 use crate::project::comm::ProjectRuntimeHandler;
 
 pub struct MainWindow {
@@ -18,7 +21,14 @@ pub struct MainWindow {
 }
 
 impl MainWindow {
-    fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
+    fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler, project_path: PathBuf) -> Self {
+        cx.on_release(move |_, app| {
+            ColorGradeApp::update_global(app, |cg_app, _| {
+                cg_app.close_project(&project_path);
+            });
+        })
+        .detach();
+
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let library = cx.new(|_cx| library::Library::new());
         let nodes = cx.new(|_cx| nodes::Nodes::new(runtime.clone()));
@@ -39,7 +49,7 @@ impl MainWindow {
         });
     }
 
-    pub fn open(app: &mut App, runtime: ProjectRuntimeHandler) {
+    pub fn open(app: &mut App, runtime: ProjectRuntimeHandler, project_path: PathBuf) {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Maximized(Bounds {
                 origin: Point {
@@ -60,7 +70,7 @@ impl MainWindow {
             ..Default::default()
         };
         gpui_kit::open_window(options, app, |window, app| {
-            let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime));
+            let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime, project_path));
             main_window_handler.update(app, |main_window, cx| {
                 main_window.init(window, cx);
             });

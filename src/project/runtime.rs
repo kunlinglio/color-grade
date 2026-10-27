@@ -16,7 +16,6 @@ use super::comm::{Command, ProjectRuntimeHandler};
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
     project_path: PathBuf,
-    thread_pool: Arc<ThreadPool>,
     // Services
     renderer: Box<dyn RenderPipe>,
     media_manager: MediaManager,
@@ -32,7 +31,6 @@ impl ProjectRuntime {
         ProjectRuntime {
             project_path,
             renderer,
-            thread_pool,
             media_manager,
             thumbnail_manager,
         }
@@ -107,7 +105,9 @@ pub struct ProjectRuntimeThread {
 
 impl ProjectRuntimeThread {
     pub fn quit(self) {
-        self.quit_sender.send(());
-        self.handler.join();
+        let _ = self.quit_sender.send(());
+        if let Err(e) = self.handler.join() {
+            error!("ProjectRuntime thread panicked during shutdown!")
+        }
     }
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui_kit::*;
@@ -26,8 +26,12 @@ impl ColorGradeApp {
     pub fn open_project(&mut self, path: PathBuf, app: &mut App) {
         let project_handler = self
             .project_manager
-            .open_project(path, self.thread_pool.clone());
-        ui::MainWindow::open(app, project_handler);
+            .open_project(path.clone(), self.thread_pool.clone());
+        ui::MainWindow::open(app, project_handler, path);
+    }
+
+    pub fn close_project(&mut self, path: &Path) {
+        self.project_manager.close_project(path);
     }
 }
 

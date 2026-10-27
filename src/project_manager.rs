@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rayon::ThreadPool;
@@ -31,4 +31,11 @@ impl ProjectManager {
         handler
     }
     // TODO: Support close a project
+    pub fn close_project(&mut self, path: &Path) {
+        let rt = self
+            .opened
+            .remove(&path.to_string_lossy().into_owned())
+            .unwrap();
+        rt.quit();
+    }
 }
