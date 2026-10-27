@@ -12,3 +12,10 @@ image = "0.25.10"
 lru = "0.19.0"
 rayon = "1.12.0"
 xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+
+[profile.dev]
+opt-level = 0
+
+# To avoid the app being unberablly slow
+[profile.dev.package."*"]
+opt-level = 3

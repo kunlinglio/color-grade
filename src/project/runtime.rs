@@ -8,7 +8,7 @@ use futures::channel::{mpsc, oneshot};
 use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
-use crate::project::editable::Editable;
+use crate::project::edit_session::EditSession;
 use crate::render::Renderer;
 use crate::render::cpu::CPURenderer;
 use crate::thumbnail::ThumbnailManager;
@@ -17,7 +17,7 @@ use super::comm::{Command, ProjectRuntimeHandler};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
-    opened: Option<Editable>,
+    opened: Option<EditSession>,
     // Services
     renderer: Box<dyn Renderer>,
     media_manager: MediaManager,
@@ -99,7 +99,7 @@ impl ProjectRuntime {
                 }
             }
             Command::OpenMedia(path) => {
-                let Ok(editable) = Editable::new(path.clone()) else {
+                let Ok(editable) = EditSession::new(path.clone()) else {
                     error!("Failed to open media at {}", path.display());
                     return;
                 };

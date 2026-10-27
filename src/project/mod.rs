@@ -1,3 +1,3 @@
 pub mod comm;
-mod editable;
+mod edit_session;
 pub mod runtime;
