@@ -4,7 +4,8 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
-use crate::render::{FrameStream, RenderedFrame};
+use crate::render::RenderedFrame;
+use crate::render::comm::FrameStream;
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,

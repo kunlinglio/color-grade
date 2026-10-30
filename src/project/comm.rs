@@ -6,7 +6,7 @@ use futures::channel::mpsc;
 use futures::channel::oneshot;
 
 use crate::media::comm::MediaSubscription;
-use crate::render::FrameStream;
+use crate::render::comm::FrameStream;
 use crate::thumbnail::ThumbnailManagerClient;
 
 /// Communicate handler from the UI and the ProjectRuntime

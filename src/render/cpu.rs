@@ -1,83 +1,107 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rayon::ThreadPool;
 
+use crate::render::comm::{FrameStream, Publisher};
 use crate::render::render_list::Op;
 use crate::render::render_list::RenderList;
-use crate::render::{Frame, FrameStream, PublishState, RenderedFrame, Renderer};
+use crate::render::{Frame, RenderedFrame, Renderer};
 
-pub struct CPURenderer {
-    publish_state: Arc<Mutex<PublishState>>,
+pub struct ScalarRenderer {
+    publisher: Arc<Mutex<Publisher>>,
+    /// This atomic variable is only for workers to check,
+    /// does not influence the commit frame
+    latest_request: Arc<AtomicU64>,
     thread_pool: Arc<ThreadPool>,
 }
 
-impl CPURenderer {
+impl ScalarRenderer {
     pub fn new(thread_pool: Arc<ThreadPool>) -> Self {
-        let publish_state = Arc::new(Mutex::new(PublishState {
-            senders: vec![],
-            version: 0,
-        }));
+        let publisher = Arc::new(Mutex::new(Publisher::new()));
         Self {
             thread_pool,
-            publish_state,
+            latest_request: Arc::new(0.into()),
+            publisher,
         }
     }
-    fn handle_render(list: RenderList, from: Arc<Frame>) -> Arc<RenderedFrame> {
-        let mut buffer = IFrame::from_frame(&from);
+    fn handle_render(
+        list: RenderList,
+        from: Arc<Frame>,
+        check_cancel: &impl Fn() -> bool,
+    ) -> Option<Arc<RenderedFrame>> {
+        let mut buffer = IFrame::from_frame(&from, &check_cancel)?;
+        let width = from.width;
         for op in list.ops {
+            if check_cancel() {
+                return None;
+            }
             match op {
                 Op::Brightness(b) => {
                     let factor = b.max(0.0);
-                    for px in buffer.rgba.chunks_exact_mut(4) {
-                        px[0] *= factor;
-                        px[1] *= factor;
-                        px[2] *= factor;
+                    let row_stride = width * 4;
+                    for row in buffer.rgba.chunks_exact_mut(row_stride) {
+                        if check_cancel() {
+                            return None;
+                        }
+                        for px in row.chunks_exact_mut(4) {
+                            px[0] *= factor;
+                            px[1] *= factor;
+                            px[2] *= factor;
+                        }
                     }
                 }
                 Op::Saturation(s) => {
-                    for px in buffer.rgba.chunks_exact_mut(4) {
-                        let y = 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
-                        px[0] = y + s * (px[0] - y);
-                        px[1] = y + s * (px[1] - y);
-                        px[2] = y + s * (px[2] - y);
+                    let row_stride = width * 4;
+                    for row in buffer.rgba.chunks_exact_mut(row_stride) {
+                        if check_cancel() {
+                            return None;
+                        }
+                        for px in row.chunks_exact_mut(4) {
+                            let y = 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2];
+                            px[0] = y + s * (px[0] - y);
+                            px[1] = y + s * (px[1] - y);
+                            px[2] = y + s * (px[2] - y);
+                        }
                     }
                 }
             }
         }
-        Arc::new(RenderedFrame::from_frame(buffer.to_frame()))
+        Some(Arc::new(RenderedFrame::from_frame(
+            buffer.to_frame(&check_cancel)?,
+        )))
     }
 }
 
-impl Renderer for CPURenderer {
+impl Renderer for ScalarRenderer {
     fn render(&self, list: RenderList, from: Arc<Frame>) {
-        let publish = self.publish_state.clone();
-        let current = publish.lock().unwrap().version + 1;
+        let publisher = self.publisher.clone();
+        let latest = self.latest_request.clone();
+        let current = latest.fetch_add(1, Ordering::Relaxed) + 1;
+        let check_cancel = move || -> bool {
+            let latest = latest.load(Ordering::Relaxed);
+            latest != current
+        };
         self.thread_pool.spawn(move || {
-            let latest = publish.lock().unwrap().version;
-            if latest >= current {
-                debug!("Renderer quit before computing, the task is outdate.");
+            if check_cancel() {
                 return;
             }
-            let frame = CPURenderer::handle_render(list, from);
-            let mut publish_gurad = publish.lock().unwrap();
-            let latest = publish_gurad.version;
-            if latest >= current {
-                debug!("Renderer quit after computing, the task is outdate.");
+            let Some(frame) = ScalarRenderer::handle_render(list, from, &check_cancel) else {
+                // None indicates cancelled
+                return;
+            };
+            if check_cancel() {
                 return;
             }
-            publish_gurad.version = current;
-            for tx in &publish_gurad.senders {
-                // Ignore the failure since the UI may quit before background tasks
-                let _ = tx.force_send(frame.clone());
+            let publisher = publisher.lock();
+            if let Ok(mut publisher) = publisher {
+                publisher.publish(current, frame)
             }
         })
     }
 
     fn subscribe(&mut self) -> FrameStream {
-        let (tx, rx) = async_channel::bounded(1);
-        let mut publish_gurad = self.publish_state.lock().unwrap();
-        publish_gurad.senders.push(tx);
-        FrameStream { rx }
+        self.publisher.lock().unwrap().subscribe()
     }
 }
 
@@ -89,28 +113,40 @@ struct IFrame {
 }
 
 impl IFrame {
-    fn from_frame(frame: &Frame) -> Self {
+    fn from_frame(frame: &Frame, check_cancel: &impl Fn() -> bool) -> Option<Self> {
         let mut rgba = Vec::new();
         rgba.reserve(frame.rgba.len());
-        for e in &frame.rgba {
-            rgba.push(e.clone() as f32);
+        let row_stride = frame.width * 4;
+        for row in frame.rgba.chunks_exact(row_stride) {
+            if check_cancel() {
+                return None;
+            }
+            for px in row {
+                rgba.push(px.clone() as f32);
+            }
         }
-        IFrame {
+        Some(IFrame {
             rgba,
             width: frame.width,
             height: frame.height,
-        }
+        })
     }
-    fn to_frame(&self) -> Frame {
+    fn to_frame(&self, check_cancel: &impl Fn() -> bool) -> Option<Frame> {
         let mut rgba = Vec::new();
         rgba.reserve(self.rgba.len());
-        for e in &self.rgba {
-            rgba.push(e.clone() as u8);
+        let row_stride = self.width * 4;
+        for row in self.rgba.chunks_exact(row_stride) {
+            if check_cancel() {
+                return None;
+            }
+            for px in row {
+                rgba.push(px.clone() as u8);
+            }
         }
-        Frame {
+        Some(Frame {
             width: self.width,
             height: self.height,
             rgba,
-        }
+        })
     }
 }

@@ -10,7 +10,7 @@ use rayon::ThreadPool;
 use crate::media::manager::MediaManager;
 use crate::project::edit_session::EditSession;
 use crate::render::Renderer;
-use crate::render::cpu::CPURenderer;
+use crate::render::cpu::ScalarRenderer;
 use crate::thumbnail::ThumbnailManager;
 
 use super::comm::{Command, ProjectRuntimeHandler};
@@ -26,7 +26,7 @@ pub struct ProjectRuntime {
 
 impl ProjectRuntime {
     pub fn new(project_path: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let renderer: Box<dyn Renderer> = Box::new(CPURenderer::new(thread_pool.clone()));
+        let renderer: Box<dyn Renderer> = Box::new(ScalarRenderer::new(thread_pool.clone()));
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
         let thumbnail_manager = ThumbnailManager::new(thread_pool.clone());
         ProjectRuntime {

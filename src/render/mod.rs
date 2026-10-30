@@ -1,3 +1,4 @@
+pub mod comm;
 pub mod cpu;
 pub mod render_list;
 
@@ -5,27 +6,12 @@ use std::sync::Arc;
 
 use image::RgbaImage;
 
+use crate::render::comm::FrameStream;
 use crate::render::render_list::RenderList;
 
 pub trait Renderer: Send {
     fn render(&self, list: RenderList, from: Arc<Frame>);
     fn subscribe(&mut self) -> FrameStream;
-}
-
-struct PublishState {
-    senders: Vec<async_channel::Sender<Arc<RenderedFrame>>>,
-    version: u128,
-}
-
-#[derive(Debug)]
-pub struct FrameStream {
-    rx: async_channel::Receiver<Arc<RenderedFrame>>,
-}
-
-impl FrameStream {
-    pub async fn next_frame(&mut self) -> Option<Arc<RenderedFrame>> {
-        self.rx.recv().await.ok()
-    }
 }
 
 /// A Frame only for UI usage.
