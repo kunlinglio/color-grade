@@ -28,14 +28,12 @@ impl Library {
         }
     }
 
-    pub fn init(
-        &self,
-        cx: &mut Context<Self>,
-        window: &mut Window,
-        mut runtime: ProjectRuntimeHandler,
-    ) {
+    pub fn init(&self, cx: &mut Context<Self>, window: &mut Window) {
         cx.spawn_in(window, async move |this, cx| {
-            // Begin scanning media.
+            let runtime = this
+                .read_with(cx, |this, _cx| this.runtime.clone())
+                .unwrap();
+            // Begin scanning media
             let media_rx = runtime.listen_on_media().await;
             let thumbnail_client = runtime.subscribe_thumbnails().await;
             let _ = this.update_in(cx, |library, window, cx| {

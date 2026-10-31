@@ -19,7 +19,7 @@ impl Monitor {
         &self,
         cx: &mut Context<Self>,
         window: &mut Window,
-        mut runtime: ProjectRuntimeHandler,
+        runtime: ProjectRuntimeHandler,
     ) {
         cx.spawn_in(window, async move |this, cx| {
             // Subscribe to the render stream.

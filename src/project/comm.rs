@@ -17,9 +17,7 @@ pub struct ProjectRuntimeHandler {
 }
 
 impl ProjectRuntimeHandler {
-    pub async fn subscribe_frame_stream(
-        &mut self,
-    ) -> FrameStream<(BackendFrame, Arc<RenderedFrame>)> {
+    pub async fn subscribe_frame_stream(&self) -> FrameStream<(BackendFrame, Arc<RenderedFrame>)> {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeFrameStream(tx))
@@ -27,7 +25,7 @@ impl ProjectRuntimeHandler {
         let frame_stream = rx.await.expect("Project Runtime thread should not quit");
         frame_stream
     }
-    pub async fn subscribe_scope(&mut self) -> FrameStream<ScopeGraph> {
+    pub async fn subscribe_scope(&self) -> FrameStream<ScopeGraph> {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeScope(tx))
@@ -50,7 +48,7 @@ impl ProjectRuntimeHandler {
             .unbounded_send(Command::SetSaturation(saturation))
             .expect("Project Runtime thread should not quit")
     }
-    pub async fn listen_on_media(&mut self) -> MediaSubscription {
+    pub async fn listen_on_media(&self) -> MediaSubscription {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeMedia(tx))
@@ -58,7 +56,7 @@ impl ProjectRuntimeHandler {
         let media_updater = rx.await.expect("Project Runtime thread should not quit");
         media_updater
     }
-    pub async fn subscribe_thumbnails(&mut self) -> ThumbnailManagerClient {
+    pub async fn subscribe_thumbnails(&self) -> ThumbnailManagerClient {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::ReqThumbnailClient(tx))

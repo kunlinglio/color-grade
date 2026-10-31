@@ -36,7 +36,7 @@ impl MainWindow {
         let library = cx.new(|_cx| library::Library::new(runtime.clone()));
         let nodes = cx.new(|_cx| nodes::Nodes::new());
         let grading = cx.new(|cx| grading::Grading::new(cx, runtime.clone()));
-        let scopes = cx.new(|_cx| scopes::Scopes::new());
+        let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
             monitor,
             library,
@@ -51,12 +51,9 @@ impl MainWindow {
         self.monitor.update(cx, |monitor, cx| {
             monitor.init(cx, window, self.runtime.clone())
         });
-        self.library.update(cx, |library, cx| {
-            library.init(cx, window, self.runtime.clone())
-        });
-        self.scopes.update(cx, |scopes, cx| {
-            scopes.init(cx, window, self.runtime.clone())
-        });
+        self.library
+            .update(cx, |library, cx| library.init(cx, window));
+        self.scopes.update(cx, |scopes, cx| scopes.init(cx, window));
     }
 
     pub fn open(app: &mut App, runtime: ProjectRuntimeHandler, project_path: PathBuf) {
@@ -116,13 +113,11 @@ impl Render for MainWindow {
                 ),
             )
             .child(
-                resizable_panel()
-                    .size_range(px(280.)..px(2000.))
-                    .child(
-                        v_resizable("right-vertical")
-                            .child(grading_panel)
-                            .child(scopes_panel),
-                    ),
+                resizable_panel().size_range(px(280.)..px(2000.)).child(
+                    v_resizable("right-vertical")
+                        .child(grading_panel)
+                        .child(scopes_panel),
+                ),
             )
     }
 }
