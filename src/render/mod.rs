@@ -1,5 +1,5 @@
-mod pipeline;
-pub use pipeline::FrameStream;
+mod scheduler;
+pub use scheduler::FrameStream;
 mod render_list;
 pub use render_list::{Op, RenderList};
 mod renderer;

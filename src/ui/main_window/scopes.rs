@@ -1,10 +1,39 @@
 use std::sync::Arc;
 
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChosenScope {
+    BrightnessHistogram,
+    RGBHistogram,
+    Vectorscope,
+    Waveform,
+}
+
+impl ChosenScope {
+    fn short_label(&self) -> &'static str {
+        match self {
+            Self::BrightnessHistogram => "His",
+            Self::RGBHistogram => "RGBHis",
+            Self::Vectorscope => "Vec",
+            Self::Waveform => "WF",
+        }
+    }
+
+    fn element_id(&self) -> &'static str {
+        match self {
+            Self::BrightnessHistogram => "scope-brightness-histogram",
+            Self::RGBHistogram => "scope-rgb-histogram",
+            Self::Vectorscope => "scope-vectorscope",
+            Self::Waveform => "scope-waveform",
+        }
+    }
+}
 
 pub struct Scopes {
     waveform: Option<Arc<RenderImage>>,
@@ -17,6 +46,8 @@ pub struct Scopes {
     last_frame: Option<BackendFrame>,
 
     runtime: ProjectRuntimeHandler,
+
+    chosen: ChosenScope,
 }
 
 impl Scopes {
@@ -29,6 +60,7 @@ impl Scopes {
             gram_size: None,
             last_frame: None,
             runtime,
+            chosen: ChosenScope::Waveform,
         }
     }
 
@@ -66,8 +98,8 @@ impl Scopes {
         // Display the latest scope graph.
         cx.spawn_in(window, async move |this, cx| {
             while let Some(graph) = scope_stream.next_frame().await {
-                let _ = this.update(cx, |scopes, cx| {
-                    scopes.apply(graph);
+                let _ = this.update_in(cx, |scopes, window, cx| {
+                    scopes.apply(graph, window);
                     cx.notify();
                 });
             }
@@ -75,11 +107,28 @@ impl Scopes {
         .detach();
     }
 
-    fn apply(&mut self, graph: ScopeGraph) {
-        self.waveform = Some(to_render_image(&graph.waveform));
-        self.vectorscope = Some(to_render_image(&graph.vectorscope));
-        self.y_histogram = Some(to_render_image(&graph.y_histogram));
-        self.rgb_histogram = Some(to_render_image(&graph.rgb_histogram));
+    fn apply(&mut self, graph: ScopeGraph, window: &mut Window) {
+        if let Some(previous) = self.waveform.replace(to_render_image(&graph.waveform)) {
+            let _ = window.drop_image(previous);
+        };
+        if let Some(previous) = self
+            .vectorscope
+            .replace(to_render_image(&graph.vectorscope))
+        {
+            let _ = window.drop_image(previous);
+        };
+        if let Some(previous) = self
+            .y_histogram
+            .replace(to_render_image(&graph.y_histogram))
+        {
+            let _ = window.drop_image(previous);
+        };
+        if let Some(previous) = self
+            .rgb_histogram
+            .replace(to_render_image(&graph.rgb_histogram))
+        {
+            let _ = window.drop_image(previous);
+        };
     }
 
     fn request_update_gram(&mut self, frame: BackendFrame) {
@@ -92,48 +141,13 @@ impl Scopes {
         }
     }
 
-    fn scope_item(
-        label: &str,
-        image: &Option<Arc<RenderImage>>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let this = cx.weak_entity();
-        div()
-            .v_flex()
-            .flex_1()
-            .min_h_0()
-            .gap_1()
-            .child(label.to_string())
-            .child(
-                div()
-                    .v_flex()
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .on_prepaint(move |bounds, _window, app| {
-                        let _ = this.update(app, |this, _cx| {
-                            let new_gram_size = Some((
-                                usize::from(bounds.size.width.round()),
-                                usize::from(bounds.size.height.round()),
-                            ));
-                            if new_gram_size != this.gram_size {
-                                this.gram_size = new_gram_size;
-                                if let Some(frame) = &this.last_frame {
-                                    this.request_update_gram(frame.clone());
-                                }
-                            }
-                        });
-                    })
-                    .child(match image {
-                        Some(i) => img(i.clone())
-                            .w_full()
-                            .flex_1()
-                            .min_h_0()
-                            .object_fit(ObjectFit::Fill)
-                            .into_any_element(),
-                        None => div().flex_1().into_any_element(),
-                    }),
-            )
+    fn get_image_by_chosen(&self) -> &Option<Arc<RenderImage>> {
+        match self.chosen {
+            ChosenScope::BrightnessHistogram => &self.y_histogram,
+            ChosenScope::RGBHistogram => &self.rgb_histogram,
+            ChosenScope::Vectorscope => &self.vectorscope,
+            ChosenScope::Waveform => &self.waveform,
+        }
     }
 }
 
@@ -141,24 +155,98 @@ fn to_render_image(frame: &RenderedFrame) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(vec![image::Frame::new(frame.to_image())]))
 }
 
+fn scope_button(
+    this: WeakEntity<Scopes>,
+    scope: ChosenScope,
+    chosen: ChosenScope,
+) -> impl IntoElement {
+    let selected = chosen == scope;
+    Button::new(scope.element_id())
+        .label(scope.short_label())
+        .ghost()
+        .compact()
+        .selected(selected)
+        .on_click(move |_, _window, app| {
+            let _ = this.update(app, |scopes, cx| {
+                scopes.chosen = scope;
+                cx.notify();
+            });
+        })
+}
+
 impl Render for Scopes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.weak_entity();
         div()
             .v_flex()
             .size_full()
-            .gap_2()
             .p_2()
-            .child(Self::scope_item("Waveform", &self.waveform, cx))
-            .child(Self::scope_item("Vectorscope", &self.vectorscope, cx))
-            .child(Self::scope_item(
-                "Brightness Histogram",
-                &self.y_histogram,
-                cx,
-            ))
-            .child(Self::scope_item(
-                "Brightness Histogram",
-                &self.rgb_histogram,
-                cx,
-            ))
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .child(text!("Scopes"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(scope_button(
+                                this.clone(),
+                                ChosenScope::Waveform,
+                                self.chosen,
+                            ))
+                            .child(scope_button(
+                                this.clone(),
+                                ChosenScope::Vectorscope,
+                                self.chosen,
+                            ))
+                            .child(scope_button(
+                                this.clone(),
+                                ChosenScope::BrightnessHistogram,
+                                self.chosen,
+                            ))
+                            .child(scope_button(
+                                this.clone(),
+                                ChosenScope::RGBHistogram,
+                                self.chosen,
+                            )),
+                    ),
+            )
+            .child(
+                div().v_flex().flex_1().min_h_0().child(
+                    div()
+                        .v_flex()
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .on_prepaint(move |bounds, _window, app| {
+                            let _ = this.update(app, |this, _cx| {
+                                let new_gram_size = Some((
+                                    usize::from(bounds.size.width.round()),
+                                    usize::from(bounds.size.height.round()),
+                                ));
+                                if new_gram_size != this.gram_size {
+                                    this.gram_size = new_gram_size;
+                                    if let Some(frame) = &this.last_frame {
+                                        this.request_update_gram(frame.clone());
+                                    }
+                                }
+                            });
+                        })
+                        .child(match self.get_image_by_chosen() {
+                            Some(i) => img(i.clone())
+                                .w_full()
+                                .flex_1()
+                                .min_h_0()
+                                .object_fit(ObjectFit::Fill)
+                                .into_any_element(),
+                            None => div().flex_1().into_any_element(),
+                        }),
+                ),
+            )
     }
 }

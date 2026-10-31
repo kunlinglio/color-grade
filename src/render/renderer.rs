@@ -4,9 +4,9 @@ use std::sync::Arc;
 use rayon::ThreadPool;
 
 use super::FrameStream;
-use super::pipeline::Pipeline;
 use super::render_list::RenderList;
 use super::scalar::ScalarBackend;
+use super::scheduler::Scheduler;
 use super::{Frame, RenderedFrame};
 
 #[derive(Clone)]
@@ -19,44 +19,44 @@ pub struct ScopeGraph {
 
 pub struct Renderer {
     /// Pipeline to handle frame render requests
-    render_pipeline: Pipeline<(RenderList, Arc<Frame>), (BackendFrame, Arc<RenderedFrame>)>,
+    render_scheduler: Scheduler<(RenderList, Arc<Frame>), (BackendFrame, Arc<RenderedFrame>)>,
     /// Pipeline to handle scope render requests
-    scope_pipeline: Pipeline<(BackendFrame, usize, usize), ScopeGraph>,
+    scope_scheduler: Scheduler<(BackendFrame, usize, usize), ScopeGraph>,
 }
 
 impl Renderer {
     pub fn new(thread_pool: Arc<ThreadPool>) -> Self {
         let render_backend = Arc::new(ScalarBackend::new());
         let scope_backend = render_backend.clone();
-        let render_pipeline = Pipeline::new(thread_pool.clone(), move |(list, frame)| {
+        let render_scheduler = Scheduler::new(thread_pool.clone(), move |(list, frame)| {
             render_backend.handle_render(list, frame)
         });
-        let scope_pipeline = Pipeline::new(thread_pool, move |(from, width, height)| {
+        let scope_scheduler = Scheduler::new(thread_pool, move |(from, width, height)| {
             scope_backend.handle_scope(from, width, height)
         });
         Renderer {
-            render_pipeline,
-            scope_pipeline,
+            render_scheduler,
+            scope_scheduler,
         }
     }
 
     pub fn render(&self, list: RenderList, from: Arc<Frame>) {
-        self.render_pipeline.submit((list, from));
+        self.render_scheduler.submit((list, from));
     }
 
     pub fn subscribe(&mut self) -> FrameStream<(BackendFrame, Arc<RenderedFrame>)> {
-        self.render_pipeline.subscribe()
+        self.render_scheduler.subscribe()
     }
 
     /// Request once, return multiple scope graph.
     /// This may be a bit expensive, but can save response latency when user switch between different scope graph.
     /// And there may be some shared process between compute different graph, this can also be beneficial.
     pub fn request_scope(&self, from: BackendFrame, width: usize, height: usize) {
-        self.scope_pipeline.submit((from, width, height));
+        self.scope_scheduler.submit((from, width, height));
     }
 
     pub fn subscribe_scope(&mut self) -> FrameStream<ScopeGraph> {
-        self.scope_pipeline.subscribe()
+        self.scope_scheduler.subscribe()
     }
 }
 

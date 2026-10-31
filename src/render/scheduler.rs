@@ -53,7 +53,7 @@ impl<Res: Clone> Publisher<Res> {
 
 /// A generic single-flight, latest-wins compute pipeline.
 /// Shared by multi component inside render/
-pub struct Pipeline<Req, Res> {
+pub struct Scheduler<Req, Res> {
     compute: Arc<dyn Fn(Req) -> Res + Send + Sync>,
     publisher: Arc<Mutex<Publisher<Res>>>,
     /// A counter to assign a unique generation id per render request.
@@ -75,7 +75,7 @@ struct PipelineState<Req> {
     in_flight: bool,
 }
 
-impl<Req, Res> Pipeline<Req, Res>
+impl<Req, Res> Scheduler<Req, Res>
 where
     Req: Send + 'static,
     Res: Clone + Send + Sync + 'static,
