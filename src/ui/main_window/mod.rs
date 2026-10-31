@@ -54,6 +54,9 @@ impl MainWindow {
         self.library.update(cx, |library, cx| {
             library.init(cx, window, self.runtime.clone())
         });
+        self.scopes.update(cx, |scopes, cx| {
+            scopes.init(cx, window, self.runtime.clone())
+        });
     }
 
     pub fn open(app: &mut App, runtime: ProjectRuntimeHandler, project_path: PathBuf) {

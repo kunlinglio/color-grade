@@ -1,12 +1,13 @@
 //! Defined the communication between the project runtime and UI
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 
 use crate::media::comm::MediaSubscription;
-use crate::render::comm::FrameStream;
+use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::thumbnail::ThumbnailManagerClient;
 
 /// Communicate handler from the UI and the ProjectRuntime
@@ -16,13 +17,27 @@ pub struct ProjectRuntimeHandler {
 }
 
 impl ProjectRuntimeHandler {
-    pub async fn subscribe_frame_stream(&mut self) -> FrameStream {
+    pub async fn subscribe_frame_stream(
+        &mut self,
+    ) -> FrameStream<(BackendFrame, Arc<RenderedFrame>)> {
         let (tx, rx) = oneshot::channel();
         self.cmd_sender
             .unbounded_send(Command::SubscribeFrameStream(tx))
             .expect("Project Runtime thread should not quit");
         let frame_stream = rx.await.expect("Project Runtime thread should not quit");
         frame_stream
+    }
+    pub async fn subscribe_scope(&mut self) -> FrameStream<ScopeGraph> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::SubscribeScope(tx))
+            .expect("Project Runtime thread should not quit");
+        rx.await.expect("Project Runtime thread should not quit")
+    }
+    pub fn request_scope(&self, from: BackendFrame, width: usize, height: usize) {
+        self.cmd_sender
+            .unbounded_send(Command::RequestScope(from, width, height))
+            .expect("Project Runtime thread should not quit")
     }
     pub fn set_brightness(&self, brightness: f32) {
         self.cmd_sender
@@ -59,7 +74,9 @@ impl ProjectRuntimeHandler {
 
 pub enum Command {
     // Request commands: Bringing a Sender
-    SubscribeFrameStream(oneshot::Sender<FrameStream>),
+    SubscribeFrameStream(oneshot::Sender<FrameStream<(BackendFrame, Arc<RenderedFrame>)>>),
+    SubscribeScope(oneshot::Sender<FrameStream<ScopeGraph>>),
+    RequestScope(BackendFrame, usize, usize),
     SubscribeMedia(oneshot::Sender<MediaSubscription>),
     ReqThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
     // Notify commands

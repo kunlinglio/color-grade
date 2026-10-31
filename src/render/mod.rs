@@ -1,6 +1,10 @@
-pub mod comm;
-pub mod render_list;
-pub mod renderer;
+mod pipeline;
+pub use pipeline::FrameStream;
+mod render_list;
+pub use render_list::{Op, RenderList};
+mod renderer;
+pub use renderer::{BackendFrame, Renderer, ScopeGraph};
+mod scalar;
 
 use image::RgbaImage;
 
@@ -40,6 +44,7 @@ impl RenderedFrame {
 
 /// A frame buffer for transferring buffers.
 /// Use rgba to make handling easier.
+#[derive(Clone)]
 pub struct Frame {
     width: usize,
     height: usize,

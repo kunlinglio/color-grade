@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::render::Frame;
-use crate::render::render_list::{Op, RenderList};
+use crate::render::{Op, RenderList};
 
 /// A opened or edited media inside a project.
 pub struct EditSession {

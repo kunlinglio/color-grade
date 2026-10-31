@@ -4,8 +4,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
-use crate::render::RenderedFrame;
-use crate::render::comm::FrameStream;
+use crate::render::{BackendFrame, FrameStream, RenderedFrame};
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
@@ -37,10 +36,10 @@ impl Monitor {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        mut frame_stream: FrameStream,
+        mut frame_stream: FrameStream<(BackendFrame, Arc<RenderedFrame>)>,
     ) {
         cx.spawn_in(window, async move |this, cx| {
-            while let Some(frame) = frame_stream.next_frame().await {
+            while let Some((_, frame)) = frame_stream.next_frame().await {
                 let _ = this.update_in(cx, |monitor, window, cx| {
                     monitor.apply_buffer(window, frame);
                     cx.notify();

@@ -9,7 +9,7 @@ use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
 use crate::project::edit_session::EditSession;
-use crate::render::renderer::Renderer;
+use crate::render::Renderer;
 use crate::thumbnail::ThumbnailManager;
 
 use super::comm::{Command, ProjectRuntimeHandler};
@@ -90,6 +90,13 @@ impl ProjectRuntime {
             Command::SubscribeFrameStream(tx) => {
                 let frame_stream = self.renderer.subscribe();
                 let _ = tx.send(frame_stream);
+            }
+            Command::SubscribeScope(tx) => {
+                let scope_stream = self.renderer.subscribe_scope();
+                let _ = tx.send(scope_stream);
+            }
+            Command::RequestScope(from, width, height) => {
+                self.renderer.request_scope(from, width, height);
             }
             Command::SubscribeMedia(tx) => {
                 let updater = self.media_manager.subscribe();
