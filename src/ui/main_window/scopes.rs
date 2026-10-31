@@ -34,9 +34,9 @@ impl Scopes {
 
     pub fn init(&self, cx: &mut Context<Self>, window: &mut Window) {
         cx.spawn_in(window, async move |this, cx| {
-            let runtime = this
-                .read_with(cx, |this, _cx| this.runtime.clone())
-                .unwrap();
+            let Ok(runtime) = this.read_with(cx, |this, _cx| this.runtime.clone()) else {
+                return;
+            };
             let frame_stream = runtime.subscribe_frame_stream().await;
             let scope_stream = runtime.subscribe_scope().await;
             let _ = this.update_in(cx, |scopes, window, cx| {

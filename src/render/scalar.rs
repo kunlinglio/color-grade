@@ -91,6 +91,8 @@ mod kernel {
     use super::ScalarFrame;
     use crate::render::RenderedFrame;
 
+    const MAX: f32 = 255.0;
+
     fn luma(r: f32, g: f32, b: f32) -> f32 {
         0.2126 * r + 0.7152 * g + 0.0722 * b
     }
@@ -124,7 +126,7 @@ mod kernel {
         let mut g_hist = vec![0 as usize; width];
         let mut b_hist = vec![0 as usize; width];
         let mut y_hist = vec![0 as usize; width];
-        const MAX: f32 = 255.0;
+
         for px in from.rgba.chunks_exact(4) {
             let to_slot = |x: f32| {
                 (x / MAX * (width - 1) as f32)
@@ -143,14 +145,14 @@ mod kernel {
         }
         // Draw
         // 1. calculate max height
-        let mut rgb_max_height = 0;
-        let mut y_max_height = 0;
-        for w in 0..width {
-            y_max_height = y_max_height.max(y_hist[w]);
-            rgb_max_height = rgb_max_height.max(r_hist[w]);
-            rgb_max_height = rgb_max_height.max(g_hist[w]);
-            rgb_max_height = rgb_max_height.max(b_hist[w]);
-        }
+        let rgb_max_height = r_hist
+            .iter()
+            .chain(g_hist.iter())
+            .chain(b_hist.iter())
+            .copied()
+            .max()
+            .unwrap_or(0);
+        let y_max_height = y_hist.iter().copied().max().unwrap_or(0);
         let mut rgb_buffer = ScalarFrame::new(width, height);
         let mut y_buffer = ScalarFrame::new(width, height);
 
@@ -214,10 +216,33 @@ mod kernel {
     }
 
     pub(super) fn waveform(from: &ScalarFrame, width: usize, height: usize) -> RenderedFrame {
+        // TODO: Support RGB waveform
         // Analyze
-
+        let mut density = vec![0u32; width * height];
+        for row in from.rgba.chunks_exact(4 * from.width) {
+            for (x, px) in row.chunks_exact(4).enumerate() {
+                let y = luma(px[0], px[1], px[2]);
+                let scope_x = x * width / from.width;
+                let normalized_y = (y / 255.0).clamp(0.0, 1.0);
+                let scope_y = ((1.0 - normalized_y) * (height - 1) as f32).round() as usize;
+                density[scope_y * width + scope_x] += 1;
+            }
+        }
         // Draw
+        let max_density = density.iter().copied().max().unwrap_or(0);
         let mut buffer = ScalarFrame::new(width, height);
+        if max_density == 0 {
+            return RenderedFrame::from_frame(buffer.to_frame());
+        }
+        for (x, row) in density.chunks_exact(width).enumerate() {
+            for (y, p) in row.iter().enumerate() {
+                let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
+                let index = (x * width + y) * 4;
+                buffer.rgba[index] = density * MAX;
+                buffer.rgba[index + 1] = density * MAX;
+                buffer.rgba[index + 2] = density * MAX;
+            }
+        }
 
         RenderedFrame::from_frame(buffer.to_frame())
     }
