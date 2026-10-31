@@ -6,12 +6,10 @@ use rayon::ThreadPool;
 use crate::render::comm::{FrameStream, Publisher};
 use crate::render::render_list::Op;
 use crate::render::render_list::RenderList;
-use crate::render::{Frame, RenderedFrame, Renderer};
+use crate::render::{Frame, RenderedFrame};
 
-/// The most basic Renderer implementation.
-/// Take no care about the performance, instead, focus on the correctness.
-/// This will used in regression tests for highly-optimized renderer implementation.
-pub struct ScalarRenderer {
+pub struct Renderer {
+    backend: Arc<dyn RendererBackend>,
     publisher: Arc<Mutex<Publisher>>,
     /// A counter to assign a unique generation id per render request.
     /// The publisher uses it to discard out-of-order frames.
@@ -32,9 +30,11 @@ struct TaskState {
     in_flight: bool,
 }
 
-impl ScalarRenderer {
+impl Renderer {
     pub fn new(thread_pool: Arc<ThreadPool>) -> Self {
+        let backend = Arc::new(ScalarBackend::new());
         Self {
+            backend,
             publisher: Arc::new(Mutex::new(Publisher::new())),
             latest_request: Arc::new(0.into()),
             state: Arc::new(Mutex::new(TaskState {
@@ -45,7 +45,79 @@ impl ScalarRenderer {
         }
     }
 
-    fn handle_render(list: RenderList, from: Arc<Frame>) -> Arc<RenderedFrame> {
+    pub fn render(&self, list: RenderList, from: Arc<Frame>) {
+        let request_gen = self.latest_request.fetch_add(1, Ordering::Relaxed) + 1;
+        let should_spawn = {
+            let mut state = self.state.lock().unwrap();
+            state.pending = Some((request_gen, list, from));
+            if state.in_flight {
+                false
+            } else {
+                state.in_flight = true;
+                true
+            }
+        };
+        if should_spawn {
+            let state = self.state.clone();
+            let publisher = self.publisher.clone();
+            let thread_pool = self.thread_pool.clone();
+            let backend = self.backend.clone();
+            self.thread_pool
+                .spawn(move || Self::render_one(backend, state, publisher, thread_pool));
+        }
+    }
+
+    pub fn subscribe(&mut self) -> FrameStream {
+        self.publisher.lock().unwrap().subscribe()
+    }
+
+    /// To avoid take one thread from threadpool forever,
+    /// we spawn a new task after finish process a frame.
+    /// But it performs just like we have a thread running a infinite loop.
+    fn render_one(
+        backend: Arc<dyn RendererBackend>,
+        state: Arc<Mutex<TaskState>>,
+        publisher: Arc<Mutex<Publisher>>,
+        thread_pool: Arc<ThreadPool>,
+    ) {
+        let (request_gen, list, from) = {
+            let mut state_guard = state.lock().unwrap();
+            let job = state_guard.pending.take();
+            let Some(req) = job else {
+                // No more jobs, break this "loop"
+                state_guard.in_flight = false;
+                return;
+            };
+            req
+        };
+        let frame = backend.handle_render(list, from);
+        {
+            let mut publisher_guard = publisher.lock().unwrap();
+            publisher_guard.publish(request_gen, frame);
+        }
+        thread_pool
+            .clone()
+            .spawn(move || Self::render_one(backend, state, publisher, thread_pool));
+    }
+}
+
+trait RendererBackend: Send + Sync {
+    fn handle_render(&self, list: RenderList, from: Arc<Frame>) -> Arc<RenderedFrame>;
+}
+
+/// The most basic Renderer implementation.
+/// Take no care about the performance, instead, focus on the correctness.
+/// This will used in regression tests for highly-optimized renderer implementation.
+struct ScalarBackend {}
+
+impl ScalarBackend {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl RendererBackend for ScalarBackend {
+    fn handle_render(&self, list: RenderList, from: Arc<Frame>) -> Arc<RenderedFrame> {
         let mut buffer = IFrame::from_frame(&from);
         let width = from.width;
         for op in list.ops {
@@ -76,61 +148,6 @@ impl ScalarRenderer {
         }
         Arc::new(RenderedFrame::from_frame(buffer.to_frame()))
     }
-}
-
-impl Renderer for ScalarRenderer {
-    fn render(&self, list: RenderList, from: Arc<Frame>) {
-        let request_gen = self.latest_request.fetch_add(1, Ordering::Relaxed) + 1;
-        let should_spawn = {
-            let mut state = self.state.lock().unwrap();
-            state.pending = Some((request_gen, list, from));
-            if state.in_flight {
-                false
-            } else {
-                state.in_flight = true;
-                true
-            }
-        };
-        if should_spawn {
-            let state = self.state.clone();
-            let publisher = self.publisher.clone();
-            let thread_pool = self.thread_pool.clone();
-            self.thread_pool
-                .spawn(move || render_one(state, publisher, thread_pool));
-        }
-    }
-
-    fn subscribe(&mut self) -> FrameStream {
-        self.publisher.lock().unwrap().subscribe()
-    }
-}
-
-/// To avoid take one thread from threadpool forever,
-/// we spawn a new task after finish process a frame.
-/// But it performs just like we have a thread running a infinite loop.
-fn render_one(
-    state: Arc<Mutex<TaskState>>,
-    publisher: Arc<Mutex<Publisher>>,
-    thread_pool: Arc<ThreadPool>,
-) {
-    let (request_gen, list, from) = {
-        let mut state_guard = state.lock().unwrap();
-        let job = state_guard.pending.take();
-        let Some(req) = job else {
-            // No more jobs, break this "loop"
-            state_guard.in_flight = false;
-            return;
-        };
-        req
-    };
-    let frame = ScalarRenderer::handle_render(list, from);
-    {
-        let mut publisher_guard = publisher.lock().unwrap();
-        publisher_guard.publish(request_gen, frame);
-    }
-    thread_pool
-        .clone()
-        .spawn(move || render_one(state, publisher, thread_pool));
 }
 
 /// Intermediate frame representation between process

@@ -1,18 +1,8 @@
 pub mod comm;
-pub mod cpu;
 pub mod render_list;
-
-use std::sync::Arc;
+pub mod renderer;
 
 use image::RgbaImage;
-
-use crate::render::comm::FrameStream;
-use crate::render::render_list::RenderList;
-
-pub trait Renderer: Send {
-    fn render(&self, list: RenderList, from: Arc<Frame>);
-    fn subscribe(&mut self) -> FrameStream;
-}
 
 /// A Frame only for UI usage.
 /// Following GPUI requirement, we use bgra inside.

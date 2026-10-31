@@ -9,8 +9,7 @@ use rayon::ThreadPool;
 
 use crate::media::manager::MediaManager;
 use crate::project::edit_session::EditSession;
-use crate::render::Renderer;
-use crate::render::cpu::ScalarRenderer;
+use crate::render::renderer::Renderer;
 use crate::thumbnail::ThumbnailManager;
 
 use super::comm::{Command, ProjectRuntimeHandler};
@@ -19,14 +18,14 @@ use super::comm::{Command, ProjectRuntimeHandler};
 pub struct ProjectRuntime {
     opened: Option<EditSession>,
     // Services
-    renderer: Box<dyn Renderer>,
+    renderer: Renderer,
     media_manager: MediaManager,
     thumbnail_manager: ThumbnailManager,
 }
 
 impl ProjectRuntime {
     pub fn new(project_path: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let renderer: Box<dyn Renderer> = Box::new(ScalarRenderer::new(thread_pool.clone()));
+        let renderer = Renderer::new(thread_pool.clone());
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
         let thumbnail_manager = ThumbnailManager::new(thread_pool.clone());
         ProjectRuntime {
