@@ -97,7 +97,6 @@ impl Scopes {
         image: &Option<Arc<RenderImage>>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let print_label = label.to_string();
         let this = cx.weak_entity();
         div()
             .v_flex()
@@ -112,7 +111,6 @@ impl Scopes {
                     .flex_1()
                     .min_h_0()
                     .on_prepaint(move |bounds, _window, app| {
-                        println!("{print_label}, bounds: {bounds}");
                         let _ = this.update(app, |this, _cx| {
                             let new_gram_size = Some((
                                 usize::from(bounds.size.width.round()),

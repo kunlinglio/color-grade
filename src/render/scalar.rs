@@ -216,6 +216,7 @@ mod kernel {
     }
 
     pub(super) fn waveform(from: &ScalarFrame, width: usize, height: usize) -> RenderedFrame {
+        assert!(width > 0 && height > 0);
         // TODO: Support RGB waveform
         // Analyze
         let mut density = vec![0u32; width * height];
@@ -234,10 +235,10 @@ mod kernel {
         if max_density == 0 {
             return RenderedFrame::from_frame(buffer.to_frame());
         }
-        for (x, row) in density.chunks_exact(width).enumerate() {
-            for (y, p) in row.iter().enumerate() {
+        for (y, row) in density.chunks_exact(width).enumerate() {
+            for (x, p) in row.iter().enumerate() {
                 let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
-                let index = (x * width + y) * 4;
+                let index = (y * width + x) * 4;
                 buffer.rgba[index] = density * MAX;
                 buffer.rgba[index + 1] = density * MAX;
                 buffer.rgba[index + 2] = density * MAX;
@@ -248,10 +249,44 @@ mod kernel {
     }
 
     pub(super) fn vectorscope(from: &ScalarFrame, width: usize, height: usize) -> RenderedFrame {
+        assert!(width > 0 && height > 0);
         // Analyze
-
+        let size = width.min(height);
+        let radius = (size - 1) as f32 / 2.0;
+        let center_x = (width - 1) as f32 / 2.0;
+        let center_y = (height - 1) as f32 / 2.0;
+        let mut density = vec![0u32; width * height];
+        for row in from.rgba.chunks_exact(4 * from.width) {
+            for px in row.chunks_exact(4) {
+                let r = px[0] / MAX;
+                let g = px[1] / MAX;
+                let b = px[2] / MAX;
+                let y = luma(r, g, b);
+                let cb = (b - y) / 1.8556;
+                let cr = (r - y) / 1.5748;
+                let x = center_x + cb * radius;
+                let y = center_y - cr * radius;
+                let x = x.round().clamp(0.0, (width - 1) as f32) as usize;
+                let y = y.round().clamp(0.0, (height - 1) as f32) as usize;
+                density[y * width + x] += 1;
+            }
+        }
         // Draw
         let mut buffer = ScalarFrame::new(width, height);
+        let max_density = density.iter().copied().max().unwrap_or(0);
+        if max_density == 0 {
+            return RenderedFrame::from_frame(buffer.to_frame());
+        }
+        for (y, row) in density.chunks_exact(width).enumerate() {
+            for (x, p) in row.iter().enumerate() {
+                let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
+                // TODO: Support color it
+                let index = (y * width + x) * 4;
+                buffer.rgba[index] = density * MAX;
+                buffer.rgba[index + 1] = density * MAX;
+                buffer.rgba[index + 2] = density * MAX;
+            }
+        }
 
         RenderedFrame::from_frame(buffer.to_frame())
     }
