@@ -1,6 +1,8 @@
+mod grading;
 mod library;
 mod monitor;
 mod nodes;
+mod scopes;
 
 use std::path::PathBuf;
 
@@ -15,6 +17,8 @@ pub struct MainWindow {
     monitor: Entity<monitor::Monitor>,
     library: Entity<library::Library>,
     nodes: Entity<nodes::Nodes>,
+    grading: Entity<grading::Grading>,
+    scopes: Entity<scopes::Scopes>,
     /// Handler for communicating with ProjectRuntime
     runtime: ProjectRuntimeHandler,
 }
@@ -30,11 +34,15 @@ impl MainWindow {
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let library = cx.new(|_cx| library::Library::new(runtime.clone()));
-        let nodes = cx.new(|cx| nodes::Nodes::new(cx, runtime.clone()));
+        let nodes = cx.new(|_cx| nodes::Nodes::new());
+        let grading = cx.new(|cx| grading::Grading::new(cx, runtime.clone()));
+        let scopes = cx.new(|_cx| scopes::Scopes::new());
         MainWindow {
             monitor,
             library,
             nodes,
+            grading,
+            scopes,
             runtime,
         }
     }
@@ -85,15 +93,33 @@ impl Render for MainWindow {
             .size_range(px(240.)..px(2400.))
             .child(self.library.clone());
         let monitor_panel = resizable_panel().child(self.monitor.clone());
-        let nodes_panel = resizable_panel().child(self.nodes.clone());
-        h_resizable("left-bottom-resizable-panel")
+        let nodes_panel = resizable_panel()
+            .size_range(px(200.)..px(2400.))
+            .child(self.nodes.clone());
+        let grading_panel = resizable_panel()
+            .size_range(px(200.)..px(2400.))
+            .child(self.grading.clone());
+        let scopes_panel = resizable_panel()
+            .size_range(px(200.)..px(2400.))
+            .child(self.scopes.clone());
+
+        h_resizable("main-horizontal")
             .child(library_panel)
             .child(
                 resizable_panel().child(
-                    v_resizable("top-horizontal")
+                    v_resizable("middle-vertical")
                         .child(monitor_panel)
                         .child(nodes_panel),
                 ),
+            )
+            .child(
+                resizable_panel()
+                    .size_range(px(280.)..px(2000.))
+                    .child(
+                        v_resizable("right-vertical")
+                            .child(grading_panel)
+                            .child(scopes_panel),
+                    ),
             )
     }
 }
