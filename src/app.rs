@@ -27,28 +27,28 @@ impl ColorGradeApp {
         gpui_kit::application()
             .with_assets(gpui_kit::assets::AllAssets)
             .run(move |app| {
-            // This must be called before using any GPUI Component features.
-            gpui_kit::init(app);
+                // This must be called before using any GPUI Component features.
+                gpui_kit::init(app);
 
-            app.set_global(self);
-            ui::init_theme(app);
+                app.set_global(self);
+                ui::init_theme(app);
 
-            // Quit the app once the last window has been closed.
-            app.on_window_closed(|cx, _window_id| {
-                if cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
+                // Quit the app once the last window has been closed.
+                app.on_window_closed(|cx, _window_id| {
+                    if cx.windows().is_empty() {
+                        cx.quit();
+                    }
+                })
+                .detach();
 
-            ColorGradeApp::update_global(app, |cg_app, app| {
-                cg_app.open_project_manager(app);
+                ColorGradeApp::update_global(app, |cg_app, app| {
+                    cg_app.open_project_manager(app);
+                });
+
+                // Get focus
+                // TODO: Make this configuratble
+                app.activate(true);
             });
-
-            // Get focus
-            // TODO: Make this configuratble
-            app.activate(true);
-        });
     }
 
     fn open_project_manager(&self, app: &mut App) {
@@ -59,7 +59,11 @@ impl ColorGradeApp {
         let project_handler = self
             .project_manager
             .open_project(path.clone(), self.thread_pool.clone());
-        ui::MainWindow::open(app, project_handler, path);
+        if let Ok(project_handler) = project_handler {
+            ui::MainWindow::open(app, project_handler, path);
+        } else {
+            error!("Failed to open project!")
+        }
     }
 
     pub fn close_project(&mut self, path: &Path) {

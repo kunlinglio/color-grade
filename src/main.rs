@@ -1,8 +1,8 @@
 use crate::app::ColorGradeApp;
 
-mod app;
 #[macro_use]
 mod logger;
+mod app;
 mod media;
 mod project;
 mod project_manager;

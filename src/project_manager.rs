@@ -18,19 +18,24 @@ impl ProjectManager {
             opened: HashMap::new(),
         }
     }
+    /// If you open a project twice, this will return Err(_)
     pub fn open_project(
         &mut self,
         path: PathBuf,
         thread_pool: Arc<ThreadPool>,
-    ) -> ProjectRuntimeHandler {
-        // TODO: Handle open same path multiple times
+    ) -> Result<ProjectRuntimeHandler, ()> {
+        if self
+            .opened
+            .contains_key(&path.to_string_lossy().into_owned())
+        {
+            return Err(());
+        }
         let runtime = ProjectRuntime::new(path.clone(), thread_pool);
         let (thread, handler) = runtime.run();
         self.opened
             .insert(path.to_string_lossy().into_owned(), thread); // FIXME: Use real project name rather than the path
-        handler
+        Ok(handler)
     }
-    // TODO: Support close a project
     pub fn close_project(&mut self, path: &Path) {
         let rt = self
             .opened
