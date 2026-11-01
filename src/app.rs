@@ -23,6 +23,36 @@ impl ColorGradeApp {
         }
     }
 
+    pub fn run(self) {
+        gpui_kit::application().run(move |app| {
+            // This must be called before using any GPUI Component features.
+            gpui_kit::init(app);
+
+            app.set_global(self);
+            ui::init_theme(app);
+
+            // Quit the app once the last window has been closed.
+            app.on_window_closed(|cx, _window_id| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+
+            ColorGradeApp::update_global(app, |cg_app, app| {
+                cg_app.open_project_manager(app);
+            });
+
+            // Get focus
+            // TODO: Make this configuratble
+            app.activate(true);
+        });
+    }
+
+    fn open_project_manager(&self, app: &mut App) {
+        ui::ProjectManagerWindow::open(app).expect("Failed to open Project Manager Window");
+    }
+
     pub fn open_project(&mut self, path: PathBuf, app: &mut App) {
         let project_handler = self
             .project_manager
