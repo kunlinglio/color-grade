@@ -1,8 +1,9 @@
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::app::ColorGradeApp;
+use crate::ui::components::{Button, Text};
+use crate::ui::get_theme;
 
 pub struct ProjectManagerWindow {}
 
@@ -60,16 +61,20 @@ impl ProjectManagerWindow {
 
 impl Render for ProjectManagerWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
         gpui_kit::div()
             .v_flex()
             .size_full()
             .gap_2()
             .p_2()
-            .child(text!("Open a folder as a new Color Grade Project!"))
+            .bg(theme.window_background_color)
+            .child(
+                Text::new("Open a folder as a new Color Grade Project!")
+                    .text_color(theme.content_font_color),
+            )
             .child(
                 Button::new("load_project")
-                    .primary()
-                    .label("Load from a folder")
+                    .child(Text::new("Chose a folder"))
                     .on_click(cx.listener(|this, _event, _window, cx| {
                         this.open_project(cx);
                     })),

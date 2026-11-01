@@ -93,6 +93,7 @@ mod kernel {
 
     const MAX: f32 = 255.0;
 
+    #[inline]
     fn luma(r: f32, g: f32, b: f32) -> f32 {
         0.2126 * r + 0.7152 * g + 0.0722 * b
     }
