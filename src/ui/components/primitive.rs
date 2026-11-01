@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use gpui_kit::IntoElement;
 use gpui_kit::base::StyledExt;
 use gpui_kit::*;
@@ -68,7 +66,7 @@ pub struct Button {
     id: ElementId,
     children: Vec<AnyElement>,
     style: StyleRefinement,
-    on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
+    on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     preset: Option<ButtonPreset>,
 }
 
@@ -91,7 +89,7 @@ impl Button {
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_click = Some(Rc::new(handler));
+        self.on_click = Some(Box::new(handler));
         self
     }
     /// Use primary preset as theme

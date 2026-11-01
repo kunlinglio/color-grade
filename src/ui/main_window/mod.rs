@@ -106,23 +106,27 @@ impl Render for MainWindow {
             .size_range(px(200.)..px(2400.))
             .child(self.scopes.clone());
 
-        div().size_full().bg(theme.window_background_color).child(
-            h_resizable("main-horizontal")
-                .child(library_panel)
-                .child(
-                    resizable_panel().child(
-                        v_resizable("middle-vertical")
-                            .child(monitor_panel)
-                            .child(nodes_panel),
+        div()
+            .size_full()
+            .bg(theme.window_background_color)
+            .text_color(theme.content_font_color)
+            .child(
+                h_resizable("main-horizontal")
+                    .child(library_panel)
+                    .child(
+                        resizable_panel().child(
+                            v_resizable("middle-vertical")
+                                .child(monitor_panel)
+                                .child(nodes_panel),
+                        ),
+                    )
+                    .child(
+                        resizable_panel().size_range(px(280.)..px(2000.)).child(
+                            v_resizable("right-vertical")
+                                .child(grading_panel)
+                                .child(scopes_panel),
+                        ),
                     ),
-                )
-                .child(
-                    resizable_panel().size_range(px(280.)..px(2000.)).child(
-                        v_resizable("right-vertical")
-                            .child(grading_panel)
-                            .child(scopes_panel),
-                    ),
-                ),
-        )
+            )
     }
 }

@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
+use crate::ui::components::ResizeSensitive;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ChosenScope {
@@ -218,12 +219,12 @@ impl Render for Scopes {
             )
             .child(
                 div().v_flex().flex_1().min_h_0().child(
-                    div()
+                    ResizeSensitive::new()
                         .v_flex()
                         .w_full()
                         .flex_1()
                         .min_h_0()
-                        .on_prepaint(move |bounds, _window, app| {
+                        .on_resize(move |bounds, _window, app| {
                             let _ = this.update(app, |this, _cx| {
                                 let new_gram_size = Some((
                                     usize::from(bounds.size.width.round()),
