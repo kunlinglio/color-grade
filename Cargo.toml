@@ -8,7 +8,7 @@ rust-version = "1.98"
 anyhow = "1.0.104"
 async-channel = "2.5.0"
 futures = "0.3.34"
-gpui-kit = "0.8.1"
+gpui-kit = { version = "0.8.1", features = ["assets"] }
 image = "0.25.10"
 lru = "0.19.0"
 rayon = "1.12.0"

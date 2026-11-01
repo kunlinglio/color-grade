@@ -1,44 +1,5 @@
 use gpui_kit::*;
 
-#[derive(Clone, Copy)]
-pub struct Theme {
-    // Background colors
-    pub window_background_color: Rgba,
-    pub panel_background_color: Rgba,
-    // Button colors
-    pub button_color: Rgba,
-    pub button_font_color: Rgba,
-    pub hover_button_color: Rgba,
-    pub selected_button_color: Rgba,
-    // Font styles
-    pub title_font_color: Rgba,
-    pub content_font_color: Rgba,
-    pub title_font_size: Pixels,
-    pub content_font_size: Pixels,
-
-    pub border_radius: Pixels,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            window_background_color: rgb(0x101010),
-            panel_background_color: rgb(0x202020),
-            button_color: rgb(0xffffff),
-            button_font_color: rgb(0x000000),
-            hover_button_color: rgb(0x505050),
-            selected_button_color: rgba(0x3b82f633),
-            title_font_color: rgb(0xffffff),
-            content_font_color: rgb(0xeeeeee),
-            title_font_size: px(20.),
-            content_font_size: px(18.),
-            border_radius: px(6.),
-        }
-    }
-}
-
-impl Global for Theme {}
-
 #[inline]
 pub fn get_theme(app: &App) -> Theme {
     *Theme::global(app)
@@ -53,4 +14,98 @@ pub fn init_theme(app: &mut App) {
     app.set_global(Theme::default());
     app.observe_global::<Theme>(|cx| cx.refresh_windows())
         .detach();
+}
+
+#[derive(Clone, Copy)]
+pub struct Theme {
+    // Background colors
+    pub window_background_color: Rgba,
+    pub panel_background_color: Rgba,
+
+    // Button colors
+    pub border_radius: Pixels,
+    /// Theme for primary button, e.g. confirm
+    pub primary_button: ButtonTheme,
+    /// Theme for normal button, e.g. cancel
+    pub normal_button: ButtonTheme,
+
+    // Font styles
+    pub title_font_color: Rgba,
+    pub content_font_color: Rgba,
+    pub title_font_size: Pixels,
+    pub content_font_size: Pixels,
+
+    // Global colors
+    pub strike_color: Rgba,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            // Background colors
+            window_background_color: rgb(0x101010),
+            panel_background_color: rgb(0x202020),
+            // Button colors
+            border_radius: px(6.),
+            primary_button: ButtonTheme::primary(),
+            normal_button: ButtonTheme::normal(),
+            // Font styles
+            title_font_color: rgb(0xffffff),
+            content_font_color: rgb(0xeeeeee),
+            title_font_size: px(20.),
+            content_font_size: px(18.),
+            // Global colors
+            strike_color: rgb(0x224589),
+        }
+    }
+}
+
+impl Global for Theme {}
+
+#[derive(Clone, Copy)]
+pub struct ButtonTheme {
+    pub normal: ColorTheme,
+    pub hover: ColorTheme,
+    pub click: ColorTheme,
+}
+
+impl ButtonTheme {
+    fn primary() -> Self {
+        Self {
+            normal: ColorTheme {
+                fg: rgb(0x000000),
+                bg: rgb(0xffffff),
+            },
+            hover: ColorTheme {
+                fg: rgb(0x000000),
+                bg: rgb(0xeeeeee),
+            },
+            click: ColorTheme {
+                fg: rgb(0x000000),
+                bg: rgb(0xcccccc),
+            },
+        }
+    }
+    fn normal() -> Self {
+        Self {
+            normal: ColorTheme {
+                fg: rgb(0xffffff),
+                bg: rgb(0x000000),
+            },
+            hover: ColorTheme {
+                fg: rgb(0xfffffff),
+                bg: rgb(0x101010),
+            },
+            click: ColorTheme {
+                fg: rgb(0xffffff),
+                bg: rgb(0x202020),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ColorTheme {
+    pub fg: Rgba,
+    pub bg: Rgba,
 }

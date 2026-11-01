@@ -2,7 +2,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::app::ColorGradeApp;
-use crate::ui::components::{Button, Text};
+use crate::ui::components::{Button, Icon, Text, Title};
 use crate::ui::get_theme;
 
 pub struct ProjectManagerWindow {}
@@ -68,12 +68,16 @@ impl Render for ProjectManagerWindow {
             .gap_2()
             .p_2()
             .bg(theme.window_background_color)
+            .child(Title::new("Open Project").text_align(TextAlign::Center))
             .child(
                 Text::new("Open a folder as a new Color Grade Project!")
                     .text_color(theme.content_font_color),
             )
             .child(
                 Button::new("load_project")
+                    .primary()
+                    .gap_1()
+                    .child(Icon::new(IconName::FolderOpen))
                     .child(Text::new("Chose a folder"))
                     .on_click(cx.listener(|this, _event, _window, cx| {
                         this.open_project(cx);

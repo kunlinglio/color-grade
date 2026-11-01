@@ -24,7 +24,9 @@ impl ColorGradeApp {
     }
 
     pub fn run(self) {
-        gpui_kit::application().run(move |app| {
+        gpui_kit::application()
+            .with_assets(gpui_kit::assets::Assets)
+            .run(move |app| {
             // This must be called before using any GPUI Component features.
             gpui_kit::init(app);
 

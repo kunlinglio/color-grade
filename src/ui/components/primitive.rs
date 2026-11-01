@@ -28,13 +28,8 @@ impl Styled for Text {
 }
 
 impl RenderOnce for Text {
-    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
-        let theme = get_theme(app);
-        div()
-            .child(self.content)
-            // .text_color(theme.content_font_color)
-            // .text_size(theme.content_font_size)
-            .refine_style(&self.style)
+    fn render(self, _window: &mut Window, _app: &mut App) -> impl IntoElement {
+        div().child(self.content).refine_style(&self.style)
     }
 }
 
@@ -63,8 +58,7 @@ impl RenderOnce for Icon {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         self.icon
-            .text_color(theme.content_font_color)
-            .text_size(theme.content_font_size)
+            .size(theme.content_font_size)
             .refine_style(&self.style)
     }
 }
@@ -75,6 +69,12 @@ pub struct Button {
     children: Vec<AnyElement>,
     style: StyleRefinement,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
+    preset: Option<ButtonPreset>,
+}
+
+enum ButtonPreset {
+    Primary,
+    Normal,
 }
 
 impl Button {
@@ -84,6 +84,7 @@ impl Button {
             children: Vec::new(),
             style: StyleRefinement::default(),
             on_click: None,
+            preset: None,
         }
     }
     pub fn on_click(
@@ -93,6 +94,17 @@ impl Button {
         self.on_click = Some(Rc::new(handler));
         self
     }
+    /// Use primary preset as theme
+    pub fn primary(mut self) -> Self {
+        self.preset = Some(ButtonPreset::Primary);
+        self
+    }
+    /// Use normal preset as theme
+    pub fn normal(mut self) -> Self {
+        self.preset = Some(ButtonPreset::Normal);
+        self
+    }
+    // TODO: Support customizable theme
 }
 
 impl Styled for Button {
@@ -105,27 +117,71 @@ impl RenderOnce for Button {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         let mut button = gpui_kit::base::Button::new(self.id)
-            // default style
-            .bg(theme.button_color)
-            .text_color(theme.button_font_color)
             .text_size(theme.content_font_size)
             .rounded(theme.border_radius)
             .p_2()
-            // activity
-            .hover(|s| s.bg(theme.hover_button_color))
-            .active(|s| s.bg(theme.hover_button_color))
-            .focus_visible(|s| s.border_1().border_color(theme.selected_button_color))
-            .children(self.children)
-            .refine_style(&self.style);
+            .focus_visible(|s| s.border_1().border_color(theme.strike_color))
+            .children(self.children);
         if let Some(on_click) = self.on_click {
             button = button.on_click(move |event, window, cx| on_click(event, window, cx));
         };
-        button
+        let button = match self.preset {
+            None => button,
+            Some(ButtonPreset::Normal) => {
+                let theme = theme.normal_button;
+                button
+                    .bg(theme.normal.bg)
+                    .text_color(theme.normal.fg)
+                    .hover(|s| s.bg(theme.hover.bg).text_color(theme.hover.fg))
+                    .active(|s| s.bg(theme.click.bg).text_color(theme.click.fg))
+            }
+            Some(ButtonPreset::Primary) => {
+                let theme = theme.primary_button;
+                button
+                    .bg(theme.normal.bg)
+                    .text_color(theme.normal.fg)
+                    .hover(|s| s.bg(theme.hover.bg).text_color(theme.hover.fg))
+                    .active(|s| s.bg(theme.click.bg).text_color(theme.click.fg))
+            }
+        };
+        button.refine_style(&self.style)
     }
 }
 
 impl ParentElement for Button {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Title {
+    content: SharedString,
+    style: StyleRefinement,
+}
+
+impl Title {
+    pub fn new(content: impl Into<SharedString>) -> Self {
+        Self {
+            content: content.into(),
+            style: StyleRefinement::default(),
+        }
+    }
+}
+
+impl Styled for Title {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for Title {
+    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        div()
+            .child(Text::new(self.content))
+            .text_color(theme.title_font_color)
+            .text_size(theme.title_font_size)
+            .refine_style(&self.style)
     }
 }
