@@ -62,7 +62,7 @@ impl ProjectManagerWindow {
 impl Render for ProjectManagerWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = get_theme(cx);
-        gpui_kit::div()
+        div()
             .v_flex()
             .size_full()
             .gap_2()

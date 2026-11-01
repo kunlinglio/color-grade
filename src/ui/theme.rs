@@ -20,7 +20,10 @@ pub fn init_theme(app: &mut App) {
 pub struct Theme {
     // Background colors
     pub window_background_color: Rgba,
-    pub panel_background_color: Rgba,
+
+    // Panel styles
+    pub panel_border_color: Rgba,
+    pub panel_border_width: Pixels,
 
     // Button colors
     pub border_radius: Pixels,
@@ -44,7 +47,9 @@ impl Default for Theme {
         Self {
             // Background colors
             window_background_color: rgb(0x101010),
-            panel_background_color: rgb(0x202020),
+            // Panel styles
+            panel_border_color: rgba(0x777777_55),
+            panel_border_width: px(2.),
             // Button colors
             border_radius: px(6.),
             primary_button: ButtonTheme::primary(),
