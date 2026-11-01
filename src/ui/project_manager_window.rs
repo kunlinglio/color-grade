@@ -2,7 +2,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::app::ColorGradeApp;
-use crate::ui::components::{Button, Icon, Text};
+use crate::ui::components::{Button, Icon, Text, TitleBar};
 use crate::ui::get_theme;
 
 pub struct ProjectManagerWindow {}
@@ -22,10 +22,10 @@ impl ProjectManagerWindow {
             )),
             titlebar: Some(TitlebarOptions {
                 title: Some("Color Grade Project Manager".into()),
-                // appears_transparent: true, // TODO: Support draw our owned title bar
-                appears_transparent: false,
-                traffic_light_position: None,
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(9.), px(7.))),
             }),
+            app_owns_titlebar_drag: true,
             ..Default::default()
         };
         gpui_kit::open_window(options, app, |_window: &mut Window, app| {
@@ -65,24 +65,30 @@ impl Render for ProjectManagerWindow {
         div()
             .v_flex()
             .size_full()
-            .gap_2()
-            .p_2()
             .bg(theme.window_background_color)
+            .child(TitleBar::new())
             .child(
-                Text::new("Open Project")
-                    .content()
-                    .text_align(TextAlign::Center),
-            )
-            .child(Text::new("Open a folder as a new Color Grade Project!").content())
-            .child(
-                Button::new("load_project")
-                    .primary()
-                    .gap_1()
-                    .child(Icon::new(IconName::FolderOpen))
-                    .child(Text::new("Chose a folder"))
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.open_project(cx);
-                    })),
+                div()
+                    .v_flex()
+                    .flex_1()
+                    .gap_2()
+                    .p_2()
+                    .child(
+                        Text::new("Open Project")
+                            .content()
+                            .text_align(TextAlign::Center),
+                    )
+                    .child(Text::new("Open a folder as a new Color Grade Project!").content())
+                    .child(
+                        Button::new("load_project")
+                            .primary()
+                            .gap_1()
+                            .child(Icon::new(IconName::FolderOpen))
+                            .child(Text::new("Chose a folder"))
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.open_project(cx);
+                            })),
+                    ),
             )
     }
 }

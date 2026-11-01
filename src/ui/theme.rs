@@ -38,10 +38,13 @@ pub struct Theme {
 
     // Global colors
     pub strike_color: Rgba,
+
+    /// Whether this is the dark theme (used by the title bar toggle).
+    pub is_dark: bool,
 }
 
-impl Default for Theme {
-    fn default() -> Self {
+impl Theme {
+    pub fn dark() -> Self {
         Self {
             // Background colors
             window_background_color: rgb(0x151515),
@@ -53,12 +56,52 @@ impl Default for Theme {
             primary_button: ButtonTheme::primary(),
             normal_button: ButtonTheme::normal(),
             // Font styles
-            title_font: FontTheme::title(),
-            content_font: FontTheme::content(),
+            title_font: FontTheme {
+                color: rgb(0xffffff),
+                size: px(20.),
+            },
+            content_font: FontTheme {
+                color: rgb(0xeeeeee),
+                size: px(16.),
+            },
 
             // Global colors
             strike_color: rgb(0x224589),
+            is_dark: true,
         }
+    }
+
+    pub fn light() -> Self {
+        Self {
+            // Background colors
+            window_background_color: rgb(0xeeeeee),
+            // Panel styles
+            panel_border_color: rgb(0xcccccc),
+            panel_border_width: px(1.5),
+            // Button colors
+            border_radius: px(6.),
+            primary_button: ButtonTheme::primary(),
+            normal_button: ButtonTheme::normal(),
+            // Font styles
+            title_font: FontTheme {
+                color: rgb(0x111111),
+                size: px(20.),
+            },
+            content_font: FontTheme {
+                color: rgb(0x333333),
+                size: px(16.),
+            },
+
+            // Global colors
+            strike_color: rgb(0x224589),
+            is_dark: false,
+        }
+    }
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self::dark()
     }
 }
 
@@ -116,19 +159,4 @@ pub struct ColorTheme {
 pub struct FontTheme {
     pub color: Rgba,
     pub size: Pixels,
-}
-
-impl FontTheme {
-    fn title() -> Self {
-        Self {
-            color: rgb(0xffffff),
-            size: px(20.),
-        }
-    }
-    fn content() -> Self {
-        Self {
-            color: rgb(0xeeeeee),
-            size: px(19.),
-        }
-    }
 }
