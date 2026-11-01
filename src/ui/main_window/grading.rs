@@ -1,10 +1,11 @@
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
+use crate::ui::components::{Slider, Text};
 
-/// Color grading panel (color wheels, curves, sliders, ...).
+/// Color grading panel
 pub struct Grading {
     runtime: ProjectRuntimeHandler,
     brightness: Entity<SliderState>,
@@ -13,14 +14,14 @@ pub struct Grading {
 
 impl Grading {
     pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
-        let brightness = cx.new(|_| {
+        let brightness = cx.new(|_cx| {
             SliderState::new()
                 .min(0.0)
                 .max(2.0)
                 .step(0.01)
                 .default_value(1.0)
         });
-        let saturation = cx.new(|_| {
+        let saturation = cx.new(|_cx| {
             SliderState::new()
                 .min(0.0)
                 .max(2.0)
@@ -28,7 +29,6 @@ impl Grading {
                 .default_value(1.0)
         });
 
-        // Send incremental values to the runtime; it owns the workflow.
         cx.subscribe(&brightness, |this, _state, event, _cx| {
             if let SliderEvent::Change(SliderValue::Single(value)) = event {
                 this.runtime.set_brightness(*value);
@@ -58,18 +58,19 @@ impl Render for Grading {
             .size_full()
             .p_4()
             .gap_4()
+            .child(Text::new("Grading").title())
             .child(
                 div()
                     .v_flex()
                     .gap_2()
-                    .child(text!("Brightness"))
+                    .child(Text::new("Brightness").content())
                     .child(Slider::new(&self.brightness)),
             )
             .child(
                 div()
                     .v_flex()
                     .gap_2()
-                    .child(text!("Saturation"))
+                    .child(Text::new("Saturation").content())
                     .child(Slider::new(&self.saturation)),
             )
     }

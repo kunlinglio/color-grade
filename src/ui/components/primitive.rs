@@ -1,21 +1,40 @@
 use gpui_kit::IntoElement;
 use gpui_kit::base::StyledExt;
+use gpui_kit::base::slider::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
 use gpui_kit::*;
 
 use crate::ui::get_theme;
+
+pub use gpui_kit::base::slider::SliderState;
 
 #[derive(IntoElement)]
 pub struct Text {
     content: SharedString,
     style: StyleRefinement,
+    preset: Option<TextPreset>,
+}
+
+enum TextPreset {
+    Content,
+    Title,
 }
 
 impl Text {
+    /// Create a text component without any style
     pub fn new(content: impl Into<SharedString>) -> Self {
         Self {
             content: content.into(),
             style: StyleRefinement::default(),
+            preset: None,
         }
+    }
+    pub fn title(mut self) -> Self {
+        self.preset = Some(TextPreset::Title);
+        self
+    }
+    pub fn content(mut self) -> Self {
+        self.preset = Some(TextPreset::Content);
+        self
     }
 }
 
@@ -26,8 +45,19 @@ impl Styled for Text {
 }
 
 impl RenderOnce for Text {
-    fn render(self, _window: &mut Window, _app: &mut App) -> impl IntoElement {
-        div().child(self.content).refine_style(&self.style)
+    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        let div = div().child(self.content);
+        let div = match self.preset {
+            None => div,
+            Some(TextPreset::Content) => div
+                .text_color(theme.content_font.color)
+                .text_size(theme.content_font.size),
+            Some(TextPreset::Title) => div
+                .text_color(theme.title_font.color)
+                .text_size(theme.title_font.size),
+        };
+        div.refine_style(&self.style)
     }
 }
 
@@ -50,13 +80,18 @@ impl Styled for Icon {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
+
+    fn text_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.icon = self.icon.text_color(color);
+        self
+    }
 }
 
 impl RenderOnce for Icon {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         self.icon
-            .size(theme.content_font_size)
+            .size(theme.content_font.size)
             .refine_style(&self.style)
     }
 }
@@ -115,7 +150,7 @@ impl RenderOnce for Button {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         let mut button = gpui_kit::base::Button::new(self.id)
-            .text_size(theme.content_font_size)
+            .text_size(theme.content_font.size)
             .rounded(theme.border_radius)
             .p_2()
             .focus_visible(|s| s.border_1().border_color(theme.strike_color))
@@ -152,13 +187,15 @@ impl ParentElement for Button {
     }
 }
 
+/// A flag element with a distinct versual effect.
+/// Can be used for debugging, flaggin todos and so on.
 #[derive(IntoElement)]
-pub struct Title {
+pub struct Warn {
     content: SharedString,
     style: StyleRefinement,
 }
 
-impl Title {
+impl Warn {
     pub fn new(content: impl Into<SharedString>) -> Self {
         Self {
             content: content.into(),
@@ -167,19 +204,87 @@ impl Title {
     }
 }
 
-impl Styled for Title {
+impl Styled for Warn {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
 }
 
-impl RenderOnce for Title {
+impl RenderOnce for Warn {
+    fn render(self, _window: &mut Window, _app: &mut App) -> impl IntoElement {
+        div()
+            .refine_style(&self.style)
+            .child(Text::new(self.content))
+            .text_color(rgb(0xffff00))
+            .text_size(px(32.))
+            .font_bold()
+            .bg(rgb(0xff0000))
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Slider {
+    state: Entity<SliderState>,
+    style: StyleRefinement,
+}
+
+impl Slider {
+    pub fn new(state: &Entity<SliderState>) -> Self {
+        Self {
+            state: state.clone(),
+            style: StyleRefinement::default(),
+        }
+    }
+}
+
+impl Styled for Slider {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for Slider {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
-        div()
-            .child(Text::new(self.content))
-            .text_color(theme.title_font_color)
-            .text_size(theme.title_font_size)
+        let end = self.state.read(app).percentage().end;
+
+        BaseSlider::new(&self.state)
+            .flex()
+            .items_center()
+            .w_full()
+            .child(
+                SliderTrack::new(&self.state)
+                    .flex()
+                    .items_center()
+                    .h_6()
+                    .w_full()
+                    .child(
+                        SliderIndicator::new(&self.state)
+                            .relative()
+                            .w_full()
+                            .h(px(4.))
+                            .bg(theme.content_font.color)
+                            .child(
+                                div()
+                                    .absolute()
+                                    .h_full()
+                                    .left(relative(0.))
+                                    .right(relative(1. - end))
+                                    .bg(theme.strike_color),
+                            )
+                            .child(
+                                SliderThumb::new(&self.state)
+                                    .absolute()
+                                    .top(-px(4.))
+                                    .left(relative(end))
+                                    .ml(-px(6.))
+                                    .w(px(12.))
+                                    .h(px(12.))
+                                    .rounded_full()
+                                    .bg(theme.title_font.color),
+                            ),
+                    ),
+            )
             .refine_style(&self.style)
     }
 }

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use strum::EnumIter;
 
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
-use crate::ui::components::ResizeSensitive;
+use crate::ui::components::{ResizeSensitive, SelectOption, SingleSelect, Text};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, EnumIter)]
 enum ChosenScope {
     BrightnessHistogram,
     RGBHistogram,
@@ -16,22 +16,21 @@ enum ChosenScope {
     Waveform,
 }
 
-impl ChosenScope {
-    fn short_label(&self) -> &'static str {
-        match self {
-            Self::BrightnessHistogram => "His",
-            Self::RGBHistogram => "RGBHis",
-            Self::Vectorscope => "Vec",
-            Self::Waveform => "WF",
-        }
-    }
-
-    fn element_id(&self) -> &'static str {
+impl SelectOption for ChosenScope {
+    fn id(self) -> &'static str {
         match self {
             Self::BrightnessHistogram => "scope-brightness-histogram",
             Self::RGBHistogram => "scope-rgb-histogram",
             Self::Vectorscope => "scope-vectorscope",
             Self::Waveform => "scope-waveform",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::BrightnessHistogram => "His",
+            Self::RGBHistogram => "RGBHis",
+            Self::Vectorscope => "Vec",
+            Self::Waveform => "WF",
         }
     }
 }
@@ -156,28 +155,10 @@ fn to_render_image(frame: &RenderedFrame) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(vec![image::Frame::new(frame.to_image())]))
 }
 
-fn scope_button(
-    this: WeakEntity<Scopes>,
-    scope: ChosenScope,
-    chosen: ChosenScope,
-) -> impl IntoElement {
-    let selected = chosen == scope;
-    Button::new(scope.element_id())
-        .label(scope.short_label())
-        .ghost()
-        .compact()
-        .selected(selected)
-        .on_click(move |_, _window, app| {
-            let _ = this.update(app, |scopes, cx| {
-                scopes.chosen = scope;
-                cx.notify();
-            });
-        })
-}
-
 impl Render for Scopes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.weak_entity();
+        let this_clone = this.clone();
         div()
             .v_flex()
             .size_full()
@@ -189,32 +170,16 @@ impl Render for Scopes {
                     .w_full()
                     .items_center()
                     .justify_between()
-                    .child(text!("Scopes"))
+                    .child(Text::new("Scopes").title())
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(scope_button(
-                                this.clone(),
-                                ChosenScope::Waveform,
-                                self.chosen,
-                            ))
-                            .child(scope_button(
-                                this.clone(),
-                                ChosenScope::Vectorscope,
-                                self.chosen,
-                            ))
-                            .child(scope_button(
-                                this.clone(),
-                                ChosenScope::BrightnessHistogram,
-                                self.chosen,
-                            ))
-                            .child(scope_button(
-                                this.clone(),
-                                ChosenScope::RGBHistogram,
-                                self.chosen,
-                            )),
+                        SingleSelect::<ChosenScope>::new()
+                            .select(self.chosen)
+                            .on_select(move |scope, _window, app| {
+                                let _ = this.update(app, |this, cx| {
+                                    this.chosen = scope;
+                                    cx.notify();
+                                });
+                            }),
                     ),
             )
             .child(
@@ -225,7 +190,7 @@ impl Render for Scopes {
                         .flex_1()
                         .min_h_0()
                         .on_resize(move |bounds, _window, app| {
-                            let _ = this.update(app, |this, _cx| {
+                            let _ = this_clone.update(app, |this, _cx| {
                                 let new_gram_size = Some((
                                     usize::from(bounds.size.width.round()),
                                     usize::from(bounds.size.height.round()),
@@ -244,6 +209,8 @@ impl Render for Scopes {
                                 .flex_1()
                                 .min_h_0()
                                 .object_fit(ObjectFit::Fill)
+                                .rounded(px(6.))
+                                .overflow_hidden()
                                 .into_any_element(),
                             None => div().flex_1().into_any_element(),
                         }),

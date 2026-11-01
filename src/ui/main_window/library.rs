@@ -10,6 +10,7 @@ use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::thumbnail::ThumbnailManagerClient;
+use crate::ui::components::{Text, Warn};
 
 pub struct Library {
     media_list: Vec<Media>,
@@ -122,59 +123,63 @@ impl Render for Library {
         let runtime = self.runtime.clone();
         let selected = self.selected;
         let this = cx.weak_entity();
-        div().v_flex().size_full().child(text!("Library")).child(
-            uniform_list("library_list", medias.len(), move |range, _window, _cx| {
-                range
-                    .map(|i| {
-                        let media = &medias[i];
-                        let thumb = thumbnails.get(&media.hash).cloned();
-                        let file_name = media
-                            .path
-                            .file_name()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        let is_selected = selected == Some(media.hash);
-                        let path = media.path.clone();
-                        let hash = media.hash;
-                        let runtime = runtime.clone();
-                        let this = this.clone();
+        div()
+            .v_flex()
+            .size_full()
+            .child(Text::new("Library").title())
+            .child(
+                uniform_list("library_list", medias.len(), move |range, _window, _cx| {
+                    range
+                        .map(|i| {
+                            let media = &medias[i];
+                            let thumb = thumbnails.get(&media.hash).cloned();
+                            let file_name = media
+                                .path
+                                .file_name()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            let is_selected = selected == Some(media.hash);
+                            let path = media.path.clone();
+                            let hash = media.hash;
+                            let runtime = runtime.clone();
+                            let this = this.clone();
 
-                        let mut item = div()
-                            .id(i)
-                            .on_click(move |_event, _window, app| {
-                                let _ = this.update(app, |library, cx| {
-                                    library.selected = Some(hash);
-                                    cx.notify();
-                                });
-                                runtime.open_media(&path);
-                            })
-                            .h(px(200.0))
-                            .v_flex()
-                            .p_2()
-                            .gap_1()
-                            .child(match thumb {
-                                Some(image) => img(image)
-                                    .w_full()
-                                    .h(px(160.0))
-                                    .object_fit(ObjectFit::Cover)
-                                    .into_any_element(),
-                                None => div()
-                                    .w_full()
-                                    .h(px(160.0))
-                                    .child(text!("..."))
-                                    .into_any_element(),
-                            })
-                            .child(div().w_full().flex().justify_center().child(file_name));
+                            let mut item = div()
+                                .id(i)
+                                .on_click(move |_event, _window, app| {
+                                    let _ = this.update(app, |library, cx| {
+                                        library.selected = Some(hash);
+                                        cx.notify();
+                                    });
+                                    runtime.open_media(&path);
+                                })
+                                .h(px(200.0))
+                                .v_flex()
+                                .p_2()
+                                .gap_1()
+                                .child(match thumb {
+                                    Some(image) => img(image)
+                                        .w_full()
+                                        .h(px(160.0))
+                                        .object_fit(ObjectFit::Cover)
+                                        .into_any_element(),
+                                    None => div()
+                                        .w_full()
+                                        .h(px(160.0))
+                                        .child(Warn::new("TODO: Implement loading animation"))
+                                        .into_any_element(),
+                                })
+                                .child(div().w_full().flex().justify_center().child(file_name));
 
-                        if is_selected {
-                            item = item.bg(rgba(0x3b_82_f6_33));
-                        }
-                        item
-                    })
-                    .collect()
-            })
-            .flex_grow(1.0)
-            .into_any_element(),
-        )
+                            if is_selected {
+                                item = item.bg(rgba(0x3b_82_f6_33));
+                            }
+                            item
+                        })
+                        .collect()
+                })
+                .flex_grow(1.0)
+                .into_any_element(),
+            )
     }
 }

@@ -5,6 +5,8 @@ use gpui_kit::*;
 
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame};
+use crate::ui::components::{Icon, Text};
+use crate::ui::get_theme;
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
@@ -61,8 +63,9 @@ impl Monitor {
 }
 
 impl Render for Monitor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui_kit::div()
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
+        div()
             .v_flex()
             .size_full()
             .gap_2()
@@ -72,7 +75,20 @@ impl Render for Monitor {
                     .size_full()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
-                None => "No Frame applied".into_any_element(),
+                None => div()
+                    .v_flex()
+                    .flex_1()
+                    .w_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .child(
+                        Icon::new(assets::IconName::ImagePlus)
+                            .text_color(theme.content_font.color)
+                            .size(px(50.)),
+                    )
+                    .child(Text::new("Open a media to start editing.").content())
+                    .into_any_element(),
             })
     }
 }

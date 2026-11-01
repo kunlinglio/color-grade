@@ -5,7 +5,7 @@ pub fn get_theme(app: &App) -> Theme {
     *Theme::global(app)
 }
 
-pub fn _set_theme(new_theme: Theme, app: &mut App) {
+pub fn set_theme(new_theme: Theme, app: &mut App) {
     Theme::update_global(app, |slot, _app| *slot = new_theme);
 }
 
@@ -33,10 +33,8 @@ pub struct Theme {
     pub normal_button: ButtonTheme,
 
     // Font styles
-    pub title_font_color: Rgba,
-    pub content_font_color: Rgba,
-    pub title_font_size: Pixels,
-    pub content_font_size: Pixels,
+    pub title_font: FontTheme,
+    pub content_font: FontTheme,
 
     // Global colors
     pub strike_color: Rgba,
@@ -46,19 +44,18 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             // Background colors
-            window_background_color: rgb(0x101010),
+            window_background_color: rgb(0x151515),
             // Panel styles
-            panel_border_color: rgba(0x777777_55),
-            panel_border_width: px(2.),
+            panel_border_color: rgb(0x222222),
+            panel_border_width: px(1.5),
             // Button colors
             border_radius: px(6.),
             primary_button: ButtonTheme::primary(),
             normal_button: ButtonTheme::normal(),
             // Font styles
-            title_font_color: rgb(0xffffff),
-            content_font_color: rgb(0xeeeeee),
-            title_font_size: px(20.),
-            content_font_size: px(18.),
+            title_font: FontTheme::title(),
+            content_font: FontTheme::content(),
+
             // Global colors
             strike_color: rgb(0x224589),
         }
@@ -113,4 +110,25 @@ impl ButtonTheme {
 pub struct ColorTheme {
     pub fg: Rgba,
     pub bg: Rgba,
+}
+
+#[derive(Clone, Copy)]
+pub struct FontTheme {
+    pub color: Rgba,
+    pub size: Pixels,
+}
+
+impl FontTheme {
+    fn title() -> Self {
+        Self {
+            color: rgb(0xffffff),
+            size: px(20.),
+        }
+    }
+    fn content() -> Self {
+        Self {
+            color: rgb(0xeeeeee),
+            size: px(19.),
+        }
+    }
 }
