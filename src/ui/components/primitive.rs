@@ -1,6 +1,9 @@
 use gpui_kit::IntoElement;
+use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt;
 use gpui_kit::base::slider::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
+use gpui_kit::component::spinner::Spinner as BaseSpinner;
+use gpui_kit::component::{Sizable as _, Size as ComponentSize};
 use gpui_kit::*;
 
 use crate::ui::get_theme;
@@ -196,11 +199,13 @@ impl ParentElement for Button {
 /// A flag element with a distinct versual effect.
 /// Can be used for debugging, flaggin todos and so on.
 #[derive(IntoElement)]
+#[allow(dead_code)]
 pub struct Warn {
     content: SharedString,
     style: StyleRefinement,
 }
 
+#[allow(dead_code)]
 impl Warn {
     pub fn new(content: impl Into<SharedString>) -> Self {
         Self {
@@ -290,6 +295,59 @@ impl RenderOnce for Slider {
                                     .bg(theme.title_font.color),
                             ),
                     ),
+            )
+            .refine_style(&self.style)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Loading {
+    size: Option<ComponentSize>,
+    color: Option<Hsla>,
+    style: StyleRefinement,
+}
+
+impl Loading {
+    pub fn new() -> Self {
+        Self {
+            size: None,
+            color: None,
+            style: StyleRefinement::default(),
+        }
+    }
+    pub fn size(mut self, size: impl Into<ComponentSize>) -> Self {
+        self.size = Some(size.into());
+        self
+    }
+}
+
+impl Styled for Loading {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+
+    fn text_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+}
+
+impl RenderOnce for Loading {
+    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        let size = self
+            .size
+            .unwrap_or(ComponentSize::Size(theme.content_font.size));
+        let color = self
+            .color
+            .unwrap_or_else(|| theme.content_font.color.into());
+
+        div()
+            .child(
+                BaseSpinner::new()
+                    .icon(IconName::LoaderCircle)
+                    .with_size(size)
+                    .color(color),
             )
             .refine_style(&self.style)
     }

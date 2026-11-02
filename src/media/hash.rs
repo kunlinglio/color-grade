@@ -10,9 +10,6 @@ impl MediaHash {
     pub fn from_file(path: &Path) -> io::Result<Self> {
         Ok(MediaHash(hash_file(path)?))
     }
-    pub fn display(&self) -> u128 {
-        return self.0;
-    }
 }
 
 fn hash_file(path: &Path) -> io::Result<u128> {

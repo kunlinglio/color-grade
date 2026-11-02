@@ -11,8 +11,12 @@ use crate::media::comm::MediaSubscription;
 use crate::media::media_type::Media;
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::thumbnail::ThumbnailManagerClient;
-use crate::ui::components::{SelectOption, SingleSelect, Text, Warn};
+use crate::ui::components::{Icon, Loading, SelectOption, SingleSelect, Text};
 use crate::ui::{Theme, get_theme};
+
+/// The constant to control how many thumbnails will be loaded.
+/// prefetched thumbs = PREFETCH_RATIO * number of Visible thumbs
+const PREFETCH_RATIO: f32 = 1.0;
 
 #[derive(Clone, Copy, EnumIter, PartialEq)]
 enum MediaSortBy {
@@ -78,6 +82,13 @@ impl MediaList {
     }
 }
 
+#[derive(Clone)]
+enum ThumbnailState {
+    Loading,
+    Loaded(Arc<RenderImage>),
+    Failed,
+}
+
 pub struct Library {
     media_list: MediaList,
     /// path -> thumb
@@ -85,7 +96,7 @@ pub struct Library {
     /// If there are two same media in different directory, they should be showed as two media,
     /// so we cannot use hash as key.
     /// Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
-    thumbnails: HashMap<Arc<Media>, Arc<RenderImage>>,
+    thumbnails: HashMap<Arc<Media>, ThumbnailState>,
     /// Pending GPU Textrue
     /// The Arc<RenderImage> cannot free it's on GPU memory.
     /// So we pending drop it until we can access window.
@@ -151,7 +162,7 @@ impl Library {
         .detach();
     }
 
-    fn update_visible(&mut self, new_visible: HashSet<Arc<Media>>, cx: &mut Context<Self>) {
+    fn fetch_thumbs(&mut self, new_visible: HashSet<Arc<Media>>, cx: &mut Context<Self>) {
         let added: Vec<_> = new_visible
             .iter()
             .filter(|key| !self.thumbnails.contains_key(*key))
@@ -164,21 +175,23 @@ impl Library {
             .filter(|key| !new_visible.contains(*key))
             .cloned()
             .collect();
+        let client = self.client.clone().unwrap();
         for media in added.into_iter() {
+            self.thumbnails
+                .insert(media.clone(), ThumbnailState::Loading);
+            let client = client.clone();
             cx.spawn(async move |this, cx| {
-                let Ok(client) = this.read_with(cx, |this, _app| this.client.clone()) else {
-                    return;
-                };
-                let Some(thumb) = client.unwrap().request(media.clone()).await else {
-                    return;
-                };
+                let thumb = client.request(media.clone()).await;
                 let _ = this.update(cx, |this, cx| {
-                    this.thumbnails.insert(
-                        media,
-                        Arc::new(RenderImage::new(vec![image::Frame::new(
-                            thumb.frame.to_image(),
-                        )])),
-                    );
+                    let Some(slot) = this.thumbnails.get_mut(&media) else {
+                        return;
+                    };
+                    *slot = match thumb {
+                        Some(thumb) => ThumbnailState::Loaded(Arc::new(RenderImage::new(vec![
+                            image::Frame::new(thumb.frame.to_image()),
+                        ]))),
+                        None => ThumbnailState::Failed,
+                    };
                     cx.notify();
                 });
             })
@@ -186,7 +199,12 @@ impl Library {
         }
         for media in removed.into_iter() {
             if let Some(old) = self.thumbnails.remove(&media) {
-                self.to_drop.push(old);
+                match old {
+                    ThumbnailState::Loaded(old) => {
+                        self.to_drop.push(old);
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -248,24 +266,34 @@ fn media_list(
             .read_with(app, |library, _| {
                 range
                     .clone()
-                    .filter_map(|i| {
-                        let media = library.media_list.list.get(i)?.clone();
+                    .map(|i| {
+                        let media = library.media_list.list[i].clone();
                         let thumb = library.thumbnails.get(&media).cloned();
-                        Some((media, thumb))
+                        (media, thumb)
                     })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
 
-        let visible: HashSet<Arc<Media>> = rows.iter().map(|(m, _)| m.clone()).collect();
         let this_for_visible = this.clone();
-        if visible.len() != 1 {
+        if range.len() != 1 {
+            let prefetch = this
+                .read_with(app, |library, _| {
+                    let total = library.media_list.list.len();
+                    let start = range.start.min(total);
+                    let end = range.end.min(total);
+                    let margin = ((end - start) as f32 * PREFETCH_RATIO * 0.5).round() as usize;
+                    (start.saturating_sub(margin)..(end + margin).min(total))
+                        .filter_map(|i| library.media_list.list.get(i).cloned())
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap();
             // The uniform list often call this callback twice:
             // First for measure element height, second for draw visible element.
             // So we should drop first call, whose range length is always 1.
             window.defer(app, move |_window, app| {
                 let _ = this_for_visible.update(app, |library, cx| {
-                    library.update_visible(visible, cx);
+                    library.fetch_thumbs(prefetch, cx);
                 });
             });
         }
@@ -277,8 +305,15 @@ fn media_list(
                 let runtime = runtime.clone();
                 let this = this.clone();
 
-                let mut item = div()
-                    .id(format!("media-{}", media.hash.display()))
+                let mut card = div()
+                    .id(format!("media-{}", media.path.display()))
+                    .h(px(160.0))
+                    .p_1()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .rounded(theme.border_radius)
+                    .overflow_hidden()
                     .on_click(move |_event, _window, app| {
                         let _ = this.update(app, |library, cx| {
                             library.selected = Some(media.clone());
@@ -286,30 +321,51 @@ fn media_list(
                         });
                         runtime.open_media(&path);
                     })
-                    .h(px(200.0))
-                    .v_flex()
-                    .p_2()
-                    .gap_1()
-                    .child(match thumb {
-                        Some(image) => img(image)
-                            .w_full()
-                            .h(px(160.0))
-                            .object_fit(ObjectFit::Cover)
-                            .into_any_element(),
-                        None => div()
-                            .w_full()
-                            .h(px(160.0))
-                            .child(Warn::new("TODO: Implement loading animation"))
-                            .into_any_element(),
-                    });
+                    .child(render_thumb(theme, thumb));
 
                 if is_selected {
-                    item = item.bg(theme.strike_color);
+                    card = card.bg(theme.strike_color);
                 }
-                item
+
+                div()
+                    .w_full()
+                    .p_1()
+                    .flex()
+                    .justify_center()
+                    .child(card)
+                    .into_any_element()
             })
             .collect()
     })
+    .p_2()
     .flex_grow(1.0)
     .into_any_element()
+}
+
+fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
+    let bg = div()
+        .w(px(200.0))
+        .h_full()
+        .rounded(theme.border_radius)
+        .bg(theme.normal_button.normal.bg)
+        .flex()
+        .items_center()
+        .justify_center();
+    match thumb {
+        Some(ThumbnailState::Loaded(image)) => img(image)
+            .h_full()
+            .rounded(px(4.))
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        Some(ThumbnailState::Failed) => bg
+            .child(
+                Icon::new(assets::IconName::ImageOff)
+                    .text_color(theme.content_font.color)
+                    .size(px(32.)),
+            )
+            .into_any_element(),
+        Some(ThumbnailState::Loading) | None => {
+            bg.child(Loading::new().size(px(32.))).into_any_element()
+        }
+    }
 }
