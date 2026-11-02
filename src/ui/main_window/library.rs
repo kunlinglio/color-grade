@@ -4,20 +4,38 @@ use std::sync::Arc;
 
 use gpui_kit::component::*;
 use gpui_kit::*;
+use strum::EnumIter;
 
 use crate::media;
 use crate::media::comm::MediaSubscription;
 use crate::media::media_type::Media;
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::thumbnail::ThumbnailManagerClient;
-use crate::ui::components::{Text, Warn};
+use crate::ui::components::{SelectOption, SingleSelect, Text, Warn};
 use crate::ui::{Theme, get_theme};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, EnumIter, PartialEq)]
 enum MediaSortBy {
     Path,
     Name,
     Hash,
+}
+
+impl SelectOption for MediaSortBy {
+    fn id(self) -> &'static str {
+        match self {
+            MediaSortBy::Hash => "library-sort_by-hash",
+            MediaSortBy::Name => "library-sort_by-name",
+            MediaSortBy::Path => "library-sort_by-path",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            MediaSortBy::Hash => "Hash",
+            MediaSortBy::Name => "Name",
+            MediaSortBy::Path => "Path",
+        }
+    }
 }
 
 /// A sorted list for storing media in a specific order.
@@ -35,11 +53,11 @@ impl MediaList {
             MediaSortBy::Path => |a, b| a.path.cmp(&b.path),
         }
     }
-    fn new(mut list: Vec<Arc<Media>>, sort_by: MediaSortBy) -> Self {
+    pub fn new(mut list: Vec<Arc<Media>>, sort_by: MediaSortBy) -> Self {
         list.sort_by(Self::compare_factory(&sort_by));
         Self { list, sort_by }
     }
-    fn insert_sorted(&mut self, media: Arc<Media>) {
+    pub fn insert_sorted(&mut self, media: Arc<Media>) {
         let compare = Self::compare_factory(&self.sort_by);
         let index = self
             .list
@@ -47,12 +65,23 @@ impl MediaList {
             .unwrap_or_else(|i| i);
         self.list.insert(index, media);
     }
+    pub fn change_sort_by(&mut self, new: MediaSortBy) {
+        if self.sort_by == new {
+            return;
+        }
+        self.sort_by = new;
+        self.list.sort_by(MediaList::compare_factory(&new));
+    }
+    pub fn replace(&mut self, by: Vec<Arc<Media>>) {
+        self.list = by;
+        self.list.sort_by(Self::compare_factory(&self.sort_by));
+    }
 }
 
 pub struct Library {
     media_list: MediaList,
     /// path -> thumb
-    /// NOTE: Use Path as key for thumbnail,
+    /// NOTE: Use Media it self as key for thumbnail,
     /// If there are two same media in different directory, they should be showed as two media,
     /// so we cannot use hash as key.
     /// Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
@@ -61,7 +90,6 @@ pub struct Library {
     /// The Arc<RenderImage> cannot free it's on GPU memory.
     /// So we pending drop it until we can access window.
     to_drop: Vec<Arc<RenderImage>>,
-    sort_by: MediaSortBy,
     selected: Option<Arc<Media>>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
@@ -69,12 +97,10 @@ pub struct Library {
 
 impl Library {
     pub fn new(runtime: ProjectRuntimeHandler) -> Self {
-        let default_sort_by = MediaSortBy::Hash;
         Library {
-            media_list: MediaList::new(Vec::new(), default_sort_by),
+            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
             thumbnails: HashMap::new(),
             to_drop: Vec::new(),
-            sort_by: default_sort_by,
             selected: None,
             runtime,
             client: None,
@@ -109,7 +135,7 @@ impl Library {
                 match e {
                     media::comm::Event::Sync(list) => {
                         let _ = this.update(cx, |library, cx| {
-                            library.media_list = MediaList::new(list, library.sort_by);
+                            library.media_list.replace(list);
                             cx.notify();
                         });
                     }
@@ -170,6 +196,10 @@ impl Library {
             let _ = window.drop_image(t);
         }
     }
+
+    fn change_sort_by(&mut self, new: MediaSortBy) {
+        self.media_list.change_sort_by(new);
+    }
 }
 
 impl Render for Library {
@@ -180,10 +210,28 @@ impl Render for Library {
         let runtime = self.runtime.clone();
         let selected = self.selected.clone();
         let this = cx.weak_entity();
+        let this_for_select = this.clone();
         div()
             .v_flex()
             .size_full()
-            .child(Text::new("Library").title())
+            .child(
+                div()
+                    .flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .child(Text::new("Library").title())
+                    .child(
+                        SingleSelect::<MediaSortBy>::new()
+                            .select(self.media_list.sort_by)
+                            .on_select(move |sort_by, _window, app| {
+                                let _ = this_for_select.update(app, |this, cx| {
+                                    this.change_sort_by(sort_by);
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+            )
             .child(media_list(theme, medias_len, runtime, selected, this))
     }
 }
@@ -211,11 +259,16 @@ fn media_list(
 
         let visible: HashSet<Arc<Media>> = rows.iter().map(|(m, _)| m.clone()).collect();
         let this_for_visible = this.clone();
-        window.defer(app, move |_window, app| {
-            let _ = this_for_visible.update(app, |library, cx| {
-                library.update_visible(visible, cx);
+        if visible.len() != 1 {
+            // The uniform list often call this callback twice:
+            // First for measure element height, second for draw visible element.
+            // So we should drop first call, whose range length is always 1.
+            window.defer(app, move |_window, app| {
+                let _ = this_for_visible.update(app, |library, cx| {
+                    library.update_visible(visible, cx);
+                });
             });
-        });
+        }
 
         rows.into_iter()
             .map(|(media, thumb)| {
