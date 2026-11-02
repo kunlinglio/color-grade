@@ -135,7 +135,8 @@ impl Render for MainWindow {
             );
         let title_bar = TitleBar::new().child(project_info).child(toggle);
         let library_panel = resizable_panel()
-            .size_range(px(240.)..px(2400.))
+            .size_range(px(100.)..px(2400.))
+            .size(px(200.))
             .child(self.library.clone());
         let monitor_panel = resizable_panel().child(self.monitor.clone());
         let nodes_panel = resizable_panel()

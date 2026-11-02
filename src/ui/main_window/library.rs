@@ -19,6 +19,11 @@ use crate::ui::{Theme, get_theme};
 /// prefetched thumbs = PREFETCH_RATIO * number of Visible thumbs
 const PREFETCH_RATIO: f32 = 1.0;
 
+/// Height / width
+/// Use to evaluate height for each thumbnail.
+///
+const PICTURE_RATIO: f32 = 3.0 / 4.0;
+
 #[derive(Clone, Copy, EnumIter, PartialEq)]
 enum MediaSortBy {
     Path,
@@ -107,6 +112,7 @@ pub struct Library {
     client: Option<ThumbnailManagerClient>,
     list_scroll_handle: UniformListScrollHandle,
     thumbnail_size: ThumbnailSize,
+    width: Pixels,
 }
 
 impl Library {
@@ -120,6 +126,7 @@ impl Library {
             client: None,
             list_scroll_handle: UniformListScrollHandle::new(),
             thumbnail_size: ThumbnailSize::Px256,
+            width: px(200.),
         }
     }
 
@@ -280,9 +287,13 @@ impl Render for Library {
                     .size_full()
                     .on_resize(move |bounds, window, app| {
                         let width = f32::from(bounds.size.width);
+                        let _ = this_for_resize.update(app, |library, cx| {
+                            library.width = px(width);
+                            cx.notify();
+                        });
                         let size = ThumbnailSize::from_width(width);
                         let needs_update = this_for_resize
-                            .read_with(app, |library, _| library.thumbnail_size != size)
+                            .read_with(app, |library, _cx| library.thumbnail_size != size)
                             .unwrap_or(false);
                         if !needs_update {
                             return;
@@ -301,6 +312,7 @@ impl Render for Library {
                         selected,
                         this,
                         self.list_scroll_handle.clone(),
+                        self.width,
                     )),
             )
     }
@@ -313,6 +325,7 @@ fn media_list(
     selected: Option<Arc<Media>>,
     this: WeakEntity<Library>,
     scroll_handle: UniformListScrollHandle,
+    width: Pixels,
 ) -> AnyElement {
     let list = uniform_list("library_list", medias_len, move |range, window, app| {
         let rows = this
@@ -357,10 +370,12 @@ fn media_list(
                 let path = media.path.clone();
                 let runtime = runtime.clone();
                 let this = this.clone();
+                let card_width = (width - px(24.0)).max(px(1.0));
+                let card_height = card_width * PICTURE_RATIO;
 
                 let mut card = div()
                     .id(format!("media-{}", media.path.display()))
-                    .h(px(160.0))
+                    .h(card_height)
                     .p_1()
                     .w_full()
                     .flex()
