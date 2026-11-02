@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use strum::EnumIter;
@@ -93,9 +94,9 @@ pub struct Library {
     media_list: MediaList,
     /// path -> thumb
     /// NOTE: Use Media it self as key for thumbnail,
-    /// If there are two same media in different directory, they should be showed as two media,
-    /// so we cannot use hash as key.
-    /// Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
+    ///     If there are two same media in different directory, they should be showed as two media,
+    ///     so we cannot use hash as key.
+    ///     Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
     thumbnails: HashMap<Arc<Media>, ThumbnailState>,
     /// Pending GPU Textrue
     /// The Arc<RenderImage> cannot free it's on GPU memory.
@@ -104,6 +105,7 @@ pub struct Library {
     selected: Option<Arc<Media>>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
+    list_scroll_handle: UniformListScrollHandle,
 }
 
 impl Library {
@@ -115,6 +117,7 @@ impl Library {
             selected: None,
             runtime,
             client: None,
+            list_scroll_handle: UniformListScrollHandle::new(),
         }
     }
 
@@ -254,7 +257,14 @@ impl Render for Library {
                             }),
                     ),
             )
-            .child(media_list(theme, medias_len, runtime, selected, this))
+            .child(media_list(
+                theme,
+                medias_len,
+                runtime,
+                selected,
+                this,
+                self.list_scroll_handle.clone(),
+            ))
     }
 }
 
@@ -264,8 +274,9 @@ fn media_list(
     runtime: ProjectRuntimeHandler,
     selected: Option<Arc<Media>>,
     this: WeakEntity<Library>,
+    scroll_handle: UniformListScrollHandle,
 ) -> AnyElement {
-    uniform_list("library_list", medias_len, move |range, window, app| {
+    let list = uniform_list("library_list", medias_len, move |range, window, app| {
         let rows = this
             .read_with(app, |library, _| {
                 range
@@ -341,9 +352,15 @@ fn media_list(
             })
             .collect()
     })
+    .track_scroll(&scroll_handle)
     .p_2()
-    .flex_grow(1.0)
-    .into_any_element()
+    .size_full();
+
+    div()
+        .h_full()
+        .child(list)
+        .child(Scrollbar::vertical(&scroll_handle).mode(ScrollbarMode::Always))
+        .into_any_element()
 }
 
 fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
