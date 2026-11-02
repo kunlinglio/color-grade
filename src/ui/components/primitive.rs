@@ -154,9 +154,15 @@ impl RenderOnce for Button {
             .rounded(theme.border_radius)
             .p_2()
             .focus_visible(|s| s.border_1().border_color(theme.strike_color))
+            // Consume pointer events so they don't bubble to an interactive
+            // ancestor such as the title bar.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(self.children);
         if let Some(on_click) = self.on_click {
-            button = button.on_click(move |event, window, cx| on_click(event, window, cx));
+            button = button.on_click(move |event, window, cx| {
+                cx.stop_propagation();
+                on_click(event, window, cx);
+            });
         };
         let button = match self.preset {
             None => button,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::num::NonZero;
 use std::sync::{Arc, Mutex};
 
@@ -17,8 +18,22 @@ pub struct Thumbnail {
     pub frame: RenderedFrame,
 }
 
+struct Cache {
+    thumbnails: LruCache<MediaHash, Arc<Thumbnail>>,
+    in_flight: HashMap<MediaHash, Vec<oneshot::Sender<Option<Arc<Thumbnail>>>>>,
+}
+
+impl Cache {
+    fn new(capacity: NonZero<usize>) -> Self {
+        Self {
+            thumbnails: LruCache::new(capacity),
+            in_flight: HashMap::new(),
+        }
+    }
+}
+
 pub struct ThumbnailManager {
-    cache: Arc<Mutex<LruCache<MediaHash, Arc<Thumbnail>>>>,
+    cache: Arc<Mutex<Cache>>,
     thread_pool: Arc<ThreadPool>,
 
     client_rx: mpsc::UnboundedReceiver<(Media, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
@@ -30,7 +45,7 @@ impl ThumbnailManager {
     pub fn new(thread_pool: Arc<ThreadPool>) -> Self {
         let (client_tx, client_rx) = mpsc::unbounded();
         ThumbnailManager {
-            cache: Arc::new(Mutex::new(LruCache::new(
+            cache: Arc::new(Mutex::new(Cache::new(
                 NonZero::new(CACHE_CAPACITY).unwrap(),
             ))),
             thread_pool,
@@ -46,31 +61,48 @@ impl ThumbnailManager {
     }
 
     pub async fn handle_event(&mut self) {
-        let Ok(new_request) = self.client_rx.recv().await else {
+        let Ok((media, tx)) = self.client_rx.recv().await else {
             return;
         };
-        let mut cache = self.cache.lock().unwrap();
-        if let Some(thumb) = cache.get(&new_request.0.hash) {
-            let _ = new_request.1.send(Some(thumb.clone()));
-            return;
+        {
+            let mut cache_guard = self.cache.lock().unwrap();
+            if let Some(thumb) = cache_guard.thumbnails.get(&media.hash) {
+                let _ = tx.send(Some(thumb.clone()));
+                return;
+            };
+            if let Some(waiters) = cache_guard.in_flight.get_mut(&media.hash) {
+                waiters.push(tx);
+                return;
+            }
+            cache_guard.in_flight.insert(media.hash, vec![tx]);
         };
         let cache = self.cache.clone();
-        self.thread_pool
-            .spawn(move || match load_thumbnail(&new_request.0) {
+        self.thread_pool.spawn(move || {
+            let res = load_thumbnail(&media);
+            let mut cache_guard = cache.lock().unwrap();
+            let waiters = cache_guard
+                .in_flight
+                .remove(&media.hash)
+                .unwrap_or_default();
+            let reply = match res {
                 Ok(thumb) => {
                     let thumb = Arc::new(thumb);
-                    cache.lock().unwrap().put(new_request.0.hash, thumb.clone());
-                    let _ = new_request.1.send(Some(thumb));
+                    cache_guard.thumbnails.put(media.hash, thumb.clone());
+                    Some(thumb)
                 }
                 Err(e) => {
                     warn!(
                         "Failed to load thumbnail for {}: {}",
-                        new_request.0.path.display(),
+                        media.path.display(),
                         e
                     );
-                    let _ = new_request.1.send(None);
+                    None
                 }
-            });
+            };
+            for waiter in waiters {
+                let _ = waiter.send(reply.clone());
+            }
+        });
     }
 }
 

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::fs::File;
 use std::io::Read;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MediaHash(u128);
 
 impl MediaHash {

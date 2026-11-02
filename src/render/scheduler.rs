@@ -65,11 +65,11 @@ pub struct Scheduler<Req, Res> {
     /// - (Some, false): we have push one task into queue, but we haven't spawn worker (transient state)
     /// - (None, true): no more task waiting, but there is task running
     /// - (Some, true): we have a task waiting, and a task running
-    state: Arc<Mutex<PipelineState<Req>>>,
+    state: Arc<Mutex<TaskState<Req>>>,
     thread_pool: Arc<ThreadPool>,
 }
 
-struct PipelineState<Req> {
+struct TaskState<Req> {
     /// The latest uncomputed request (generation, request).
     pending: Option<(u64, Req)>,
     in_flight: bool,
@@ -88,7 +88,7 @@ where
             compute: Arc::new(compute),
             publisher: Arc::new(Mutex::new(Publisher::new())),
             latest_request: Arc::new(0.into()),
-            state: Arc::new(Mutex::new(PipelineState {
+            state: Arc::new(Mutex::new(TaskState {
                 pending: None,
                 in_flight: false,
             })),
@@ -128,7 +128,7 @@ where
     /// thread is held for the whole session.
     fn run_once(
         compute: Arc<dyn Fn(Req) -> Res + Send + Sync>,
-        state: Arc<Mutex<PipelineState<Req>>>,
+        state: Arc<Mutex<TaskState<Req>>>,
         publisher: Arc<Mutex<Publisher<Res>>>,
         thread_pool: Arc<ThreadPool>,
     ) {
