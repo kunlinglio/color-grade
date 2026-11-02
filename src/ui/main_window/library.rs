@@ -381,7 +381,6 @@ fn media_list(
                     .flex()
                     .justify_center()
                     .rounded(theme.border_radius)
-                    .overflow_hidden()
                     .on_click(move |_event, _window, app| {
                         let _ = this.update(app, |library, cx| {
                             library.selected = Some(media.clone());
@@ -418,8 +417,7 @@ fn media_list(
 
 fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
     let bg = div()
-        .w(px(200.0))
-        .h_full()
+        .size_full()
         .rounded(theme.border_radius)
         .bg(theme.normal_button.normal.bg)
         .flex()
