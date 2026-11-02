@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 use futures::channel::mpsc;
 
 use super::media_type::Media;
 
 pub enum Event {
-    Sync(Vec<Media>),
-    Add(Media),
+    Sync(Vec<Arc<Media>>),
+    Add(Arc<Media>),
 }
 
 #[derive(Debug)]

@@ -1,8 +1,7 @@
-use std::io;
-use std::path::Path;
-
 use std::fs::File;
+use std::io;
 use std::io::Read;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MediaHash(u128);
@@ -10,6 +9,9 @@ pub struct MediaHash(u128);
 impl MediaHash {
     pub fn from_file(path: &Path) -> io::Result<Self> {
         Ok(MediaHash(hash_file(path)?))
+    }
+    pub fn display(&self) -> u128 {
+        return self.0;
     }
 }
 

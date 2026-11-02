@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZero;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures::channel::{mpsc, oneshot};
@@ -36,9 +37,9 @@ pub struct ThumbnailManager {
     cache: Arc<Mutex<Cache>>,
     thread_pool: Arc<ThreadPool>,
 
-    client_rx: mpsc::UnboundedReceiver<(Media, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    client_rx: mpsc::UnboundedReceiver<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
     /// Shared sender for all client
-    client_tx: mpsc::UnboundedSender<(Media, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    client_tx: mpsc::UnboundedSender<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
 }
 
 impl ThumbnailManager {
@@ -78,7 +79,7 @@ impl ThumbnailManager {
         };
         let cache = self.cache.clone();
         self.thread_pool.spawn(move || {
-            let res = load_thumbnail(&media);
+            let res = load_thumbnail(&media.path);
             let mut cache_guard = cache.lock().unwrap();
             let waiters = cache_guard
                 .in_flight
@@ -109,11 +110,11 @@ impl ThumbnailManager {
 /// A client object to handle binary communication between UI and thumbnail manager
 #[derive(Clone)]
 pub struct ThumbnailManagerClient {
-    tx: mpsc::UnboundedSender<(Media, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    tx: mpsc::UnboundedSender<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
 }
 
 impl ThumbnailManagerClient {
-    pub async fn request(&self, media: Media) -> Option<Arc<Thumbnail>> {
+    pub async fn request(&self, media: Arc<Media>) -> Option<Arc<Thumbnail>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.tx.unbounded_send((media, tx));
         rx.await
@@ -121,8 +122,8 @@ impl ThumbnailManagerClient {
     }
 }
 
-fn load_thumbnail(media: &Media) -> anyhow::Result<Thumbnail> {
-    let img = image::ImageReader::open(&media.path)?
+fn load_thumbnail(path: &PathBuf) -> anyhow::Result<Thumbnail> {
+    let img = image::ImageReader::open(path)?
         .with_guessed_format()?
         .decode()?;
 

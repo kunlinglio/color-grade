@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::media::hash::MediaHash;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum MediaKind {
     JPEG,
     PNG,
@@ -25,7 +25,7 @@ impl MediaKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Media {
     pub path: PathBuf,
     pub kind: MediaKind,

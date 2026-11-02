@@ -15,11 +15,11 @@ pub struct MediaManager {
     thread_pool: Arc<ThreadPool>,
 
     /// Owned by rayon worker when scanning
-    scan_tx: mpsc::UnboundedSender<Media>,
-    scan_rx: mpsc::UnboundedReceiver<Media>,
+    scan_tx: mpsc::UnboundedSender<Arc<Media>>,
+    scan_rx: mpsc::UnboundedReceiver<Arc<Media>>,
 
     /// Path -> Media
-    media: HashMap<PathBuf, Media>,
+    media: HashMap<PathBuf, Arc<Media>>,
     /// Sender for ui subscriber
     /// TODO: Support remove subscribers
     ui_tx: Vec<mpsc::UnboundedSender<Event>>,
@@ -27,7 +27,7 @@ pub struct MediaManager {
 
 impl MediaManager {
     pub fn new(root: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let (scan_tx, scan_rx) = mpsc::unbounded::<Media>();
+        let (scan_tx, scan_rx) = mpsc::unbounded();
         MediaManager {
             root,
             thread_pool,
@@ -56,7 +56,7 @@ impl MediaManager {
         self.thread_pool.spawn(move || {
             recursive_scan(&root, &mut |media| {
                 // Ignore the failure since the UI may quit before background tasks
-                let _ = tx.unbounded_send(media);
+                let _ = tx.unbounded_send(Arc::new(media));
             });
         });
     }

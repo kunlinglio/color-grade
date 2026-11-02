@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::ops::Range;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui_kit::component::*;
@@ -9,12 +7,11 @@ use gpui_kit::*;
 
 use crate::media;
 use crate::media::comm::MediaSubscription;
-use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::thumbnail::ThumbnailManagerClient;
 use crate::ui::components::{Text, Warn};
-use crate::ui::get_theme;
+use crate::ui::{Theme, get_theme};
 
 #[derive(Clone, Copy)]
 enum MediaSortBy {
@@ -26,23 +23,23 @@ enum MediaSortBy {
 /// A sorted list for storing media in a specific order.
 #[derive(Clone)]
 struct MediaList {
-    list: Vec<Media>,
+    list: Vec<Arc<Media>>,
     sort_by: MediaSortBy,
 }
 
 impl MediaList {
-    fn compare_factory(sort_by: &MediaSortBy) -> fn(&Media, &Media) -> Ordering {
+    fn compare_factory(sort_by: &MediaSortBy) -> fn(&Arc<Media>, &Arc<Media>) -> Ordering {
         match sort_by {
             MediaSortBy::Hash => |a, b| a.hash.cmp(&b.hash),
             MediaSortBy::Name => |a, b| a.path.file_name().cmp(&b.path.file_name()),
             MediaSortBy::Path => |a, b| a.path.cmp(&b.path),
         }
     }
-    fn new(mut list: Vec<Media>, sort_by: MediaSortBy) -> Self {
+    fn new(mut list: Vec<Arc<Media>>, sort_by: MediaSortBy) -> Self {
         list.sort_by(Self::compare_factory(&sort_by));
         Self { list, sort_by }
     }
-    fn insert_sorted(&mut self, media: Media) {
+    fn insert_sorted(&mut self, media: Arc<Media>) {
         let compare = Self::compare_factory(&self.sort_by);
         let index = self
             .list
@@ -54,20 +51,18 @@ impl MediaList {
 
 pub struct Library {
     media_list: MediaList,
-    /// Used to compute diff
-    last_visible: Range<usize>,
     /// path -> thumb
     /// NOTE: Use Path as key for thumbnail,
     /// If there are two same media in different directory, they should be showed as two media,
     /// so we cannot use hash as key.
     /// Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
-    thumbnails: HashMap<PathBuf, Arc<RenderImage>>,
+    thumbnails: HashMap<Arc<Media>, Arc<RenderImage>>,
     /// Pending GPU Textrue
     /// The Arc<RenderImage> cannot free it's on GPU memory.
     /// So we pending drop it until we can access window.
     to_drop: Vec<Arc<RenderImage>>,
     sort_by: MediaSortBy,
-    selected: Option<MediaHash>,
+    selected: Option<Arc<Media>>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
 }
@@ -77,7 +72,6 @@ impl Library {
         let default_sort_by = MediaSortBy::Hash;
         Library {
             media_list: MediaList::new(Vec::new(), default_sort_by),
-            last_visible: Range::from(0..0),
             thumbnails: HashMap::new(),
             to_drop: Vec::new(),
             sort_by: default_sort_by,
@@ -131,15 +125,20 @@ impl Library {
         .detach();
     }
 
-    fn update_visible(&mut self, new_visible: Range<usize>, cx: &mut Context<Self>) {
-        if new_visible == self.last_visible {
-            return;
-        }
-        let diff = range_diff(&self.last_visible, &new_visible);
-        let added = diff.added;
-        let removed = diff.removed;
-        for index in added.into_iter().flatten() {
-            let media = self.media_list.list[index].clone();
+    fn update_visible(&mut self, new_visible: HashSet<Arc<Media>>, cx: &mut Context<Self>) {
+        let added: Vec<_> = new_visible
+            .iter()
+            .filter(|key| !self.thumbnails.contains_key(*key))
+            .cloned()
+            .collect();
+
+        let removed: Vec<_> = self
+            .thumbnails
+            .keys()
+            .filter(|key| !new_visible.contains(*key))
+            .cloned()
+            .collect();
+        for media in added.into_iter() {
             cx.spawn(async move |this, cx| {
                 let Ok(client) = this.read_with(cx, |this, _app| this.client.clone()) else {
                     return;
@@ -149,7 +148,7 @@ impl Library {
                 };
                 let _ = this.update(cx, |this, cx| {
                     this.thumbnails.insert(
-                        media.path,
+                        media,
                         Arc::new(RenderImage::new(vec![image::Frame::new(
                             thumb.frame.to_image(),
                         )])),
@@ -159,13 +158,11 @@ impl Library {
             })
             .detach();
         }
-        for index in removed.into_iter().flatten() {
-            let media = &self.media_list.list[index];
-            if let Some(old) = self.thumbnails.remove(&media.path) {
+        for media in removed.into_iter() {
+            if let Some(old) = self.thumbnails.remove(&media) {
                 self.to_drop.push(old);
             }
         }
-        self.last_visible = new_visible;
     }
 
     fn clean_texture(&mut self, window: &mut Window) {
@@ -179,110 +176,87 @@ impl Render for Library {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.clean_texture(window);
         let theme = get_theme(cx);
-        let medias = self.media_list.clone();
-        let thumbnails = self.thumbnails.clone();
+        let medias_len = self.media_list.list.len();
         let runtime = self.runtime.clone();
-        let selected = self.selected;
+        let selected = self.selected.clone();
         let this = cx.weak_entity();
         div()
             .v_flex()
             .size_full()
             .child(Text::new("Library").title())
-            .child(
-                uniform_list(
-                    "library_list",
-                    medias.list.len(),
-                    move |range, window, app| {
-                        let this_cloned = this.clone();
-                        let visible = range.clone();
-                        if visible.len() != 1 {
-                            // The uniform list often call this callback twice:
-                            // First for measure element height, second for draw visible element.
-                            // So we should drop first call, whose range length is always 1.
-                            window.defer(app, move |_window, app| {
-                                let _ = this_cloned.update(app, |library, cx| {
-                                    library.update_visible(visible, cx);
-                                });
-                            });
-                        }
-
-                        range
-                            .map(|i| {
-                                let media = &medias.list[i];
-                                let thumb = thumbnails.get(&media.path).cloned();
-                                let is_selected = selected == Some(media.hash);
-                                let path = media.path.clone();
-                                let hash = media.hash;
-                                let runtime = runtime.clone();
-                                let this = this.clone();
-
-                                let mut item = div()
-                                    .id(i)
-                                    .on_click(move |_event, _window, app| {
-                                        let _ = this.update(app, |library, cx| {
-                                            library.selected = Some(hash);
-                                            cx.notify();
-                                        });
-                                        runtime.open_media(&path);
-                                    })
-                                    .h(px(200.0))
-                                    .v_flex()
-                                    .p_2()
-                                    .gap_1()
-                                    .child(match thumb {
-                                        Some(image) => img(image)
-                                            .w_full()
-                                            .h(px(160.0))
-                                            .object_fit(ObjectFit::Cover)
-                                            .into_any_element(),
-                                        None => div()
-                                            .w_full()
-                                            .h(px(160.0))
-                                            .child(Warn::new("TODO: Implement loading animation"))
-                                            .into_any_element(),
-                                    });
-
-                                if is_selected {
-                                    item = item.bg(theme.strike_color);
-                                }
-                                item
-                            })
-                            .collect()
-                    },
-                )
-                .flex_grow(1.0)
-                .into_any_element(),
-            )
+            .child(media_list(theme, medias_len, runtime, selected, this))
     }
 }
 
-pub struct RangeDiff {
-    pub added: Vec<Range<usize>>,
-    pub removed: Vec<Range<usize>>,
-}
+fn media_list(
+    theme: Theme,
+    medias_len: usize,
+    runtime: ProjectRuntimeHandler,
+    selected: Option<Arc<Media>>,
+    this: WeakEntity<Library>,
+) -> AnyElement {
+    uniform_list("library_list", medias_len, move |range, window, app| {
+        let rows = this
+            .read_with(app, |library, _| {
+                range
+                    .clone()
+                    .filter_map(|i| {
+                        let media = library.media_list.list.get(i)?.clone();
+                        let thumb = library.thumbnails.get(&media).cloned();
+                        Some((media, thumb))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
-/// Return (added, removed)
-pub fn range_diff(old: &Range<usize>, new: &Range<usize>) -> RangeDiff {
-    RangeDiff {
-        added: subtract_range(&new, &old),
-        removed: subtract_range(&old, &new),
-    }
-}
+        let visible: HashSet<Arc<Media>> = rows.iter().map(|(m, _)| m.clone()).collect();
+        let this_for_visible = this.clone();
+        window.defer(app, move |_window, app| {
+            let _ = this_for_visible.update(app, |library, cx| {
+                library.update_visible(visible, cx);
+            });
+        });
 
-fn subtract_range(a: &Range<usize>, b: &Range<usize>) -> Vec<Range<usize>> {
-    let mut result = Vec::with_capacity(2);
-    if a.end <= b.start || b.end <= a.start {
-        if !a.is_empty() {
-            result.push(a.clone());
-        }
-        return result;
-    }
+        rows.into_iter()
+            .map(|(media, thumb)| {
+                let is_selected = selected.as_ref() == Some(&media);
+                let path = media.path.clone();
+                let runtime = runtime.clone();
+                let this = this.clone();
 
-    if a.start < b.start {
-        result.push(a.start..b.start);
-    }
-    if b.end < a.end {
-        result.push(b.end..a.end);
-    }
-    result
+                let mut item = div()
+                    .id(format!("media-{}", media.hash.display()))
+                    .on_click(move |_event, _window, app| {
+                        let _ = this.update(app, |library, cx| {
+                            library.selected = Some(media.clone());
+                            cx.notify();
+                        });
+                        runtime.open_media(&path);
+                    })
+                    .h(px(200.0))
+                    .v_flex()
+                    .p_2()
+                    .gap_1()
+                    .child(match thumb {
+                        Some(image) => img(image)
+                            .w_full()
+                            .h(px(160.0))
+                            .object_fit(ObjectFit::Cover)
+                            .into_any_element(),
+                        None => div()
+                            .w_full()
+                            .h(px(160.0))
+                            .child(Warn::new("TODO: Implement loading animation"))
+                            .into_any_element(),
+                    });
+
+                if is_selected {
+                    item = item.bg(theme.strike_color);
+                }
+                item
+            })
+            .collect()
+    })
+    .flex_grow(1.0)
+    .into_any_element()
 }
