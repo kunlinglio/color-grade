@@ -11,8 +11,8 @@ use crate::media;
 use crate::media::comm::MediaSubscription;
 use crate::media::media_type::Media;
 use crate::project::comm::ProjectRuntimeHandler;
-use crate::thumbnail::ThumbnailManagerClient;
-use crate::ui::components::{Icon, Loading, SelectOption, SingleSelect, Text};
+use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
+use crate::ui::components::{Icon, Loading, ResizeSensitive, SelectOption, SingleSelect, Text};
 use crate::ui::{Theme, get_theme};
 
 /// The constant to control how many thumbnails will be loaded.
@@ -85,7 +85,7 @@ impl MediaList {
 
 #[derive(Clone)]
 enum ThumbnailState {
-    Loading,
+    Loading(ThumbnailSize),
     Loaded(Arc<RenderImage>),
     Failed,
 }
@@ -106,6 +106,7 @@ pub struct Library {
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
     list_scroll_handle: UniformListScrollHandle,
+    thumbnail_size: ThumbnailSize,
 }
 
 impl Library {
@@ -118,6 +119,7 @@ impl Library {
             runtime,
             client: None,
             list_scroll_handle: UniformListScrollHandle::new(),
+            thumbnail_size: ThumbnailSize::Px256,
         }
     }
 
@@ -179,17 +181,18 @@ impl Library {
             .cloned()
             .collect();
         let client = self.client.clone().unwrap();
+        let size = self.thumbnail_size;
         for media in added.into_iter() {
             self.thumbnails
-                .insert(media.clone(), ThumbnailState::Loading);
+                .insert(media.clone(), ThumbnailState::Loading(size));
             let client = client.clone();
             cx.spawn(async move |this, cx| {
-                let thumb = client.request(media.clone()).await;
+                let thumb = client.request(media.clone(), size).await;
                 let _ = this.update(cx, |this, cx| {
                     let Some(slot) = this.thumbnails.get_mut(&media) else {
                         return;
                     };
-                    if !matches!(*slot, ThumbnailState::Loading) {
+                    if !matches!(*slot, ThumbnailState::Loading(current) if current == size) {
                         // Avoid cover other state
                         return;
                     }
@@ -225,6 +228,20 @@ impl Library {
     fn change_sort_by(&mut self, new: MediaSortBy) {
         self.media_list.change_sort_by(new);
     }
+
+    fn change_thumbnail_size(&mut self, new: ThumbnailSize, cx: &mut Context<Self>) {
+        if self.thumbnail_size == new {
+            return;
+        }
+
+        self.thumbnail_size = new;
+        for (_, state) in self.thumbnails.drain() {
+            if let ThumbnailState::Loaded(image) = state {
+                self.to_drop.push(image);
+            }
+        }
+        cx.notify();
+    }
 }
 
 impl Render for Library {
@@ -236,6 +253,7 @@ impl Render for Library {
         let selected = self.selected.clone();
         let this = cx.weak_entity();
         let this_for_select = this.clone();
+        let this_for_resize = this.clone();
         div()
             .v_flex()
             .size_full()
@@ -257,14 +275,34 @@ impl Render for Library {
                             }),
                     ),
             )
-            .child(media_list(
-                theme,
-                medias_len,
-                runtime,
-                selected,
-                this,
-                self.list_scroll_handle.clone(),
-            ))
+            .child(
+                ResizeSensitive::new()
+                    .size_full()
+                    .on_resize(move |bounds, window, app| {
+                        let width = f32::from(bounds.size.width);
+                        let size = ThumbnailSize::from_width(width);
+                        let needs_update = this_for_resize
+                            .read_with(app, |library, _| library.thumbnail_size != size)
+                            .unwrap_or(false);
+                        if !needs_update {
+                            return;
+                        }
+                        let this = this_for_resize.clone();
+                        window.defer(app, move |_window, app| {
+                            let _ = this.update(app, |library, cx| {
+                                library.change_thumbnail_size(size, cx);
+                            });
+                        });
+                    })
+                    .child(media_list(
+                        theme,
+                        medias_len,
+                        runtime,
+                        selected,
+                        this,
+                        self.list_scroll_handle.clone(),
+                    )),
+            )
     }
 }
 
@@ -385,7 +423,7 @@ fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
                     .size(px(32.)),
             )
             .into_any_element(),
-        Some(ThumbnailState::Loading) | None => {
+        Some(ThumbnailState::Loading(_)) | None => {
             bg.child(Loading::new().size(px(32.))).into_any_element()
         }
     }

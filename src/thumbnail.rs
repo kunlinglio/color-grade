@@ -12,16 +12,51 @@ use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::render::RenderedFrame;
 
-const THUMBNAIL_HEIGHT: usize = 256;
 const CACHE_CAPACITY: usize = 256;
 
+/// The max size of thumbnail image.
+/// (size = max(height, width))
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThumbnailSize {
+    Px128,
+    Px256,
+    Px512,
+    Px1024,
+    Px2048,
+}
+
+impl ThumbnailSize {
+    pub fn from_width(width: f32) -> Self {
+        if width <= 128.0 {
+            Self::Px128
+        } else if width <= 256.0 {
+            Self::Px256
+        } else if width <= 512.0 {
+            Self::Px512
+        } else if width <= 1024.0 {
+            Self::Px1024
+        } else {
+            Self::Px2048
+        }
+    }
+
+    fn pixels(self) -> u32 {
+        match self {
+            Self::Px128 => 128,
+            Self::Px256 => 256,
+            Self::Px512 => 512,
+            Self::Px1024 => 1024,
+            Self::Px2048 => 2048,
+        }
+    }
+}
 pub struct Thumbnail {
     pub frame: RenderedFrame,
 }
 
 struct Cache {
-    thumbnails: LruCache<MediaHash, Arc<Thumbnail>>,
-    in_flight: HashMap<MediaHash, Vec<oneshot::Sender<Option<Arc<Thumbnail>>>>>,
+    thumbnails: LruCache<(ThumbnailSize, MediaHash), Arc<Thumbnail>>,
+    in_flight: HashMap<(ThumbnailSize, MediaHash), Vec<oneshot::Sender<Option<Arc<Thumbnail>>>>>,
 }
 
 impl Cache {
@@ -37,9 +72,17 @@ pub struct ThumbnailManager {
     cache: Arc<Mutex<Cache>>,
     thread_pool: Arc<ThreadPool>,
 
-    client_rx: mpsc::UnboundedReceiver<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    client_rx: mpsc::UnboundedReceiver<(
+        Arc<Media>,
+        ThumbnailSize,
+        oneshot::Sender<Option<Arc<Thumbnail>>>,
+    )>,
     /// Shared sender for all client
-    client_tx: mpsc::UnboundedSender<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    client_tx: mpsc::UnboundedSender<(
+        Arc<Media>,
+        ThumbnailSize,
+        oneshot::Sender<Option<Arc<Thumbnail>>>,
+    )>,
 }
 
 impl ThumbnailManager {
@@ -62,33 +105,31 @@ impl ThumbnailManager {
     }
 
     pub async fn handle_event(&mut self) {
-        let Ok((media, tx)) = self.client_rx.recv().await else {
+        let Ok((media, size, tx)) = self.client_rx.recv().await else {
             return;
         };
+        let key = (size, media.hash);
         {
             let mut cache_guard = self.cache.lock().unwrap();
-            if let Some(thumb) = cache_guard.thumbnails.get(&media.hash) {
+            if let Some(thumb) = cache_guard.thumbnails.get(&key) {
                 let _ = tx.send(Some(thumb.clone()));
                 return;
             };
-            if let Some(waiters) = cache_guard.in_flight.get_mut(&media.hash) {
+            if let Some(waiters) = cache_guard.in_flight.get_mut(&key) {
                 waiters.push(tx);
                 return;
             }
-            cache_guard.in_flight.insert(media.hash, vec![tx]);
+            cache_guard.in_flight.insert(key, vec![tx]);
         };
         let cache = self.cache.clone();
         self.thread_pool.spawn(move || {
-            let res = load_thumbnail(&media.path);
+            let res = load_thumbnail(&media.path, size);
             let mut cache_guard = cache.lock().unwrap();
-            let waiters = cache_guard
-                .in_flight
-                .remove(&media.hash)
-                .unwrap_or_default();
+            let waiters = cache_guard.in_flight.remove(&key).unwrap_or_default();
             let reply = match res {
                 Ok(thumb) => {
                     let thumb = Arc::new(thumb);
-                    cache_guard.thumbnails.put(media.hash, thumb.clone());
+                    cache_guard.thumbnails.put(key, thumb.clone());
                     Some(thumb)
                 }
                 Err(e) => {
@@ -110,28 +151,32 @@ impl ThumbnailManager {
 /// A client object to handle binary communication between UI and thumbnail manager
 #[derive(Clone)]
 pub struct ThumbnailManagerClient {
-    tx: mpsc::UnboundedSender<(Arc<Media>, oneshot::Sender<Option<Arc<Thumbnail>>>)>,
+    tx: mpsc::UnboundedSender<(
+        Arc<Media>,
+        ThumbnailSize,
+        oneshot::Sender<Option<Arc<Thumbnail>>>,
+    )>,
 }
 
 impl ThumbnailManagerClient {
-    pub async fn request(&self, media: Arc<Media>) -> Option<Arc<Thumbnail>> {
+    pub async fn request(&self, media: Arc<Media>, size: ThumbnailSize) -> Option<Arc<Thumbnail>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.unbounded_send((media, tx));
+        let _ = self.tx.unbounded_send((media, size, tx));
         rx.await
             .expect("The Project Runtime thread should not quit!")
     }
 }
 
-fn load_thumbnail(path: &PathBuf) -> anyhow::Result<Thumbnail> {
+fn load_thumbnail(path: &PathBuf, size: ThumbnailSize) -> anyhow::Result<Thumbnail> {
     let img = image::ImageReader::open(path)?
         .with_guessed_format()?
         .decode()?;
 
     let (w, h) = img.dimensions();
+    let max_size = size.pixels();
 
-    let img = if h > THUMBNAIL_HEIGHT as u32 {
-        let new_w = ((w as f64 * THUMBNAIL_HEIGHT as f64) / h as f64).round() as u32;
-        img.thumbnail(new_w.max(1), THUMBNAIL_HEIGHT as u32)
+    let img = if w > max_size || h > max_size {
+        img.thumbnail(max_size, max_size)
     } else {
         img
     };
