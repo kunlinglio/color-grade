@@ -186,6 +186,10 @@ impl Library {
                     let Some(slot) = this.thumbnails.get_mut(&media) else {
                         return;
                     };
+                    if !matches!(*slot, ThumbnailState::Loading) {
+                        // Avoid cover other state
+                        return;
+                    }
                     *slot = match thumb {
                         Some(thumb) => ThumbnailState::Loaded(Arc::new(RenderImage::new(vec![
                             image::Frame::new(thumb.frame.to_image()),
@@ -276,7 +280,7 @@ fn media_list(
             .unwrap_or_default();
 
         let this_for_visible = this.clone();
-        if range.len() != 1 {
+        if range.len() != 1 || medias_len == 1 {
             let prefetch = this
                 .read_with(app, |library, _| {
                     let total = library.media_list.list.len();
