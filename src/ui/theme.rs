@@ -87,36 +87,36 @@ impl Theme {
         Self {
             colors: ThemeColors {
                 background: BackgroundColors {
-                    canvas: rgb(0x151515),
-                    surface: rgb(0x202020),
-                    elevated: rgb(0x2c2c2c),
+                    canvas: rgb(0x09090b),
+                    surface: rgb(0x18181b),
+                    elevated: rgb(0x27272a),
                 },
                 text: TextColors {
-                    primary: rgb(0xffffff),
-                    secondary: rgb(0xeeeeee),
-                    muted: rgb(0x999999),
-                    inverse: rgb(0xffffff),
+                    primary: rgb(0xfafafa),
+                    secondary: rgb(0xd4d4d8),
+                    muted: rgb(0xa1a1aa),
+                    inverse: rgb(0xfafafa),
                 },
                 border: BorderColors {
-                    subtle: rgb(0x2c2c2c),
+                    subtle: rgb(0x2f2f33),
                 },
                 accent: AccentColors {
-                    normal: rgb(0x224589),
-                    hover: rgb(0x2d56a0),
-                    active: rgb(0x19366d),
+                    normal: rgb(0x3154c7),
+                    hover: rgb(0x3b63dc),
+                    active: rgb(0x2744a8),
                 },
-                focus: rgb(0x4f7dd8),
+                focus: rgb(0x7895ff),
             },
             typography: Typography {
-                title: px(20.),
-                content: px(16.),
+                title: px(18.),
+                content: px(14.),
             },
             radii: Radii {
                 small: px(4.),
                 medium: px(6.),
                 large: px(8.),
             },
-            border_width: px(1.5),
+            border_width: px(1.),
             is_dark: true,
         }
     }
@@ -125,36 +125,36 @@ impl Theme {
         Self {
             colors: ThemeColors {
                 background: BackgroundColors {
-                    canvas: rgb(0xeeeeee),
+                    canvas: rgb(0xf4f4f5),
                     surface: rgb(0xffffff),
-                    elevated: rgb(0xdddddd),
+                    elevated: rgb(0xe4e4e7),
                 },
                 text: TextColors {
-                    primary: rgb(0x111111),
-                    secondary: rgb(0x333333),
-                    muted: rgb(0x777777),
+                    primary: rgb(0x18181b),
+                    secondary: rgb(0x3f3f46),
+                    muted: rgb(0x71717a),
                     inverse: rgb(0xffffff),
                 },
                 border: BorderColors {
-                    subtle: rgb(0xcccccc),
+                    subtle: rgb(0xd4d4d8),
                 },
                 accent: AccentColors {
-                    normal: rgb(0x224589),
-                    hover: rgb(0x2d56a0),
-                    active: rgb(0x19366d),
+                    normal: rgb(0x3154c7),
+                    hover: rgb(0x2849b5),
+                    active: rgb(0x203b96),
                 },
-                focus: rgb(0x224589),
+                focus: rgb(0x3154c7),
             },
             typography: Typography {
-                title: px(20.),
-                content: px(16.),
+                title: px(18.),
+                content: px(14.),
             },
             radii: Radii {
                 small: px(4.),
                 medium: px(6.),
                 large: px(8.),
             },
-            border_width: px(1.5),
+            border_width: px(1.),
             is_dark: false,
         }
     }
