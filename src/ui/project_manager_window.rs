@@ -65,7 +65,7 @@ impl Render for ProjectManagerWindow {
         div()
             .v_flex()
             .size_full()
-            .bg(theme.window_background_color)
+            .bg(theme.colors.background.canvas)
             .child(TitleBar::new())
             .child(
                 div()

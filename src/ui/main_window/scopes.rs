@@ -7,6 +7,7 @@ use strum::EnumIter;
 use crate::project::comm::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::ui::components::{ResizeSensitive, SelectOption, SingleSelect, Text};
+use crate::ui::get_theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, EnumIter)]
 enum ChosenScope {
@@ -157,6 +158,7 @@ fn to_render_image(frame: &RenderedFrame) -> Arc<RenderImage> {
 
 impl Render for Scopes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
         let this = cx.weak_entity();
         let this_clone = this.clone();
         div()
@@ -209,7 +211,7 @@ impl Render for Scopes {
                                 .flex_1()
                                 .min_h_0()
                                 .object_fit(ObjectFit::Fill)
-                                .rounded(px(6.))
+                                .rounded(theme.radii.medium)
                                 .overflow_hidden()
                                 .into_any_element(),
                             None => div().flex_1().into_any_element(),

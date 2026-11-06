@@ -15,11 +15,11 @@ fn handle_appearance() -> base::ResizeHandleRenderer {
             div()
                 .flex_none()
                 .flex()
-                .bg(theme.panel_border_color)
+                .bg(theme.colors.border.subtle)
                 .map(|l| match axis {
-                    Axis::Horizontal => l.w(theme.panel_border_width).h_full().items_center(),
+                    Axis::Horizontal => l.w(theme.border_width).h_full().items_center(),
                     _ => l
-                        .h(theme.panel_border_width)
+                        .h(theme.border_width)
                         .w_full()
                         .items_start()
                         .justify_center(),

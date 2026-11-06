@@ -59,7 +59,7 @@ impl RenderOnce for TitleBar {
             .pr(px(8.))
             .flex_shrink_0()
             .border_b_1()
-            .border_color(theme.panel_border_color)
+            .border_color(theme.colors.border.subtle)
             .on_double_click(move |_event, window, _cx| {
                 if cfg!(target_os = "macos") {
                     window.titlebar_double_click();

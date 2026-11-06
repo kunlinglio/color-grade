@@ -84,7 +84,7 @@ impl Render for Monitor {
                     .gap_2()
                     .child(
                         Icon::new(assets::IconName::ImagePlus)
-                            .text_color(theme.content_font.color)
+                            .text_color(theme.colors.text.secondary)
                             .size(px(50.)),
                     )
                     .child(Text::new("Open a media to start editing.").content())

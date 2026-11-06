@@ -20,6 +20,7 @@ pub struct Text {
 enum TextPreset {
     Content,
     Title,
+    Muted,
 }
 
 impl Text {
@@ -39,6 +40,10 @@ impl Text {
         self.preset = Some(TextPreset::Content);
         self
     }
+    pub fn muted(mut self) -> Self {
+        self.preset = Some(TextPreset::Muted);
+        self
+    }
 }
 
 impl Styled for Text {
@@ -54,11 +59,14 @@ impl RenderOnce for Text {
         let div = match self.preset {
             None => div,
             Some(TextPreset::Content) => div
-                .text_color(theme.content_font.color)
-                .text_size(theme.content_font.size),
+                .text_color(theme.colors.text.secondary)
+                .text_size(theme.typography.content),
             Some(TextPreset::Title) => div
-                .text_color(theme.title_font.color)
-                .text_size(theme.title_font.size),
+                .text_color(theme.colors.text.primary)
+                .text_size(theme.typography.title),
+            Some(TextPreset::Muted) => div
+                .text_color(theme.colors.text.muted)
+                .text_size(theme.typography.content),
         };
         div.refine_style(&self.style)
     }
@@ -94,7 +102,7 @@ impl RenderOnce for Icon {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         self.icon
-            .size(theme.content_font.size)
+            .size(theme.typography.content)
             .refine_style(&self.style)
     }
 }
@@ -130,17 +138,16 @@ impl Button {
         self.on_click = Some(Box::new(handler));
         self
     }
-    /// Use primary preset as theme
+    /// Use the emphasized action variant.
     pub fn primary(mut self) -> Self {
         self.preset = Some(ButtonPreset::Primary);
         self
     }
-    /// Use normal preset as theme
+    /// Use the neutral action variant.
     pub fn normal(mut self) -> Self {
         self.preset = Some(ButtonPreset::Normal);
         self
     }
-    // TODO: Support customizable theme
 }
 
 impl Styled for Button {
@@ -153,10 +160,10 @@ impl RenderOnce for Button {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         let mut button = gpui_kit::base::Button::new(self.id)
-            .text_size(theme.content_font.size)
-            .rounded(theme.border_radius)
+            .text_size(theme.typography.content)
+            .rounded(theme.radii.medium)
             .p_2()
-            .focus_visible(|s| s.border_1().border_color(theme.strike_color))
+            .focus_visible(|s| s.border_1().border_color(theme.colors.focus))
             // Consume pointer events so they don't bubble to an interactive
             // ancestor such as the title bar.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -169,22 +176,16 @@ impl RenderOnce for Button {
         };
         let button = match self.preset {
             None => button,
-            Some(ButtonPreset::Normal) => {
-                let theme = theme.normal_button;
-                button
-                    .bg(theme.normal.bg)
-                    .text_color(theme.normal.fg)
-                    .hover(|s| s.bg(theme.hover.bg).text_color(theme.hover.fg))
-                    .active(|s| s.bg(theme.click.bg).text_color(theme.click.fg))
-            }
-            Some(ButtonPreset::Primary) => {
-                let theme = theme.primary_button;
-                button
-                    .bg(theme.normal.bg)
-                    .text_color(theme.normal.fg)
-                    .hover(|s| s.bg(theme.hover.bg).text_color(theme.hover.fg))
-                    .active(|s| s.bg(theme.click.bg).text_color(theme.click.fg))
-            }
+            Some(ButtonPreset::Normal) => button
+                .bg(theme.colors.background.canvas)
+                .text_color(theme.colors.text.primary)
+                .hover(|s| s.bg(theme.colors.background.surface))
+                .active(|s| s.bg(theme.colors.background.elevated)),
+            Some(ButtonPreset::Primary) => button
+                .bg(theme.colors.accent.normal)
+                .text_color(theme.colors.text.inverse)
+                .hover(|s| s.bg(theme.colors.accent.hover))
+                .active(|s| s.bg(theme.colors.accent.active)),
         };
         button.refine_style(&self.style)
     }
@@ -274,14 +275,14 @@ impl RenderOnce for Slider {
                             .relative()
                             .w_full()
                             .h(px(4.))
-                            .bg(theme.content_font.color)
+                            .bg(theme.colors.background.elevated)
                             .child(
                                 div()
                                     .absolute()
                                     .h_full()
                                     .left(relative(0.))
                                     .right(relative(1. - end))
-                                    .bg(theme.strike_color),
+                                    .bg(theme.colors.accent.normal),
                             )
                             .child(
                                 SliderThumb::new(&self.state)
@@ -292,7 +293,7 @@ impl RenderOnce for Slider {
                                     .w(px(12.))
                                     .h(px(12.))
                                     .rounded_full()
-                                    .bg(theme.title_font.color),
+                                    .bg(theme.colors.text.primary),
                             ),
                     ),
             )
@@ -337,10 +338,10 @@ impl RenderOnce for Loading {
         let theme = get_theme(app);
         let size = self
             .size
-            .unwrap_or(ComponentSize::Size(theme.content_font.size));
+            .unwrap_or(ComponentSize::Size(theme.typography.content));
         let color = self
             .color
-            .unwrap_or_else(|| theme.content_font.color.into());
+            .unwrap_or_else(|| theme.colors.text.secondary.into());
 
         div()
             .child(

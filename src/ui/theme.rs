@@ -16,84 +16,145 @@ pub fn init_theme(app: &mut App) {
         .detach();
 }
 
+/// Application-wide design tokens.
+///
+/// Components own their visual recipes and choose which token to use for each
+/// variant and interaction state.
 #[derive(Clone, Copy)]
 pub struct Theme {
-    // Background colors
-    pub window_background_color: Rgba,
+    pub colors: ThemeColors,
+    pub typography: Typography,
+    pub radii: Radii,
+    pub border_width: Pixels,
 
-    // Panel styles
-    pub panel_border_color: Rgba,
-    pub panel_border_width: Pixels,
-
-    // Button colors
-    pub border_radius: Pixels,
-    /// Theme for primary button, e.g. confirm
-    pub primary_button: ButtonTheme,
-    /// Theme for normal button, e.g. cancel
-    pub normal_button: ButtonTheme,
-
-    // Font styles
-    pub title_font: FontTheme,
-    pub content_font: FontTheme,
-
-    // Global colors
-    pub strike_color: Rgba,
-
-    /// Whether this is the dark theme (used by the title bar toggle).
+    /// Whether this is the dark theme
     pub is_dark: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct ThemeColors {
+    pub background: BackgroundColors,
+    pub text: TextColors,
+    pub border: BorderColors,
+    pub accent: AccentColors,
+    pub focus: Rgba,
+}
+
+/// Neutral background hierarchy, from the base canvas to stronger surfaces.
+#[derive(Clone, Copy)]
+pub struct BackgroundColors {
+    pub canvas: Rgba,
+    pub surface: Rgba,
+    pub elevated: Rgba,
+}
+
+/// Text hierarchy. `inverse` is for text rendered on an accent background.
+#[derive(Clone, Copy)]
+pub struct TextColors {
+    pub primary: Rgba,
+    pub secondary: Rgba,
+    pub muted: Rgba,
+    pub inverse: Rgba,
+}
+
+#[derive(Clone, Copy)]
+pub struct BorderColors {
+    pub subtle: Rgba,
+}
+
+#[derive(Clone, Copy)]
+pub struct Radii {
+    pub small: Pixels,
+    pub medium: Pixels,
+    pub large: Pixels,
+}
+
+#[derive(Clone, Copy)]
+pub struct AccentColors {
+    pub normal: Rgba,
+    pub hover: Rgba,
+    pub active: Rgba,
+}
+
+#[derive(Clone, Copy)]
+pub struct Typography {
+    pub title: Pixels,
+    pub content: Pixels,
 }
 
 impl Theme {
     pub fn dark() -> Self {
         Self {
-            // Background colors
-            window_background_color: rgb(0x151515),
-            // Panel styles
-            panel_border_color: rgb(0x222222),
-            panel_border_width: px(1.5),
-            // Button colors
-            border_radius: px(6.),
-            primary_button: ButtonTheme::primary(),
-            normal_button: ButtonTheme::normal(),
-            // Font styles
-            title_font: FontTheme {
-                color: rgb(0xffffff),
-                size: px(20.),
+            colors: ThemeColors {
+                background: BackgroundColors {
+                    canvas: rgb(0x151515),
+                    surface: rgb(0x202020),
+                    elevated: rgb(0x2c2c2c),
+                },
+                text: TextColors {
+                    primary: rgb(0xffffff),
+                    secondary: rgb(0xeeeeee),
+                    muted: rgb(0x999999),
+                    inverse: rgb(0xffffff),
+                },
+                border: BorderColors {
+                    subtle: rgb(0x2c2c2c),
+                },
+                accent: AccentColors {
+                    normal: rgb(0x224589),
+                    hover: rgb(0x2d56a0),
+                    active: rgb(0x19366d),
+                },
+                focus: rgb(0x4f7dd8),
             },
-            content_font: FontTheme {
-                color: rgb(0xeeeeee),
-                size: px(16.),
+            typography: Typography {
+                title: px(20.),
+                content: px(16.),
             },
-
-            // Global colors
-            strike_color: rgb(0x224589),
+            radii: Radii {
+                small: px(4.),
+                medium: px(6.),
+                large: px(8.),
+            },
+            border_width: px(1.5),
             is_dark: true,
         }
     }
 
     pub fn light() -> Self {
         Self {
-            // Background colors
-            window_background_color: rgb(0xeeeeee),
-            // Panel styles
-            panel_border_color: rgb(0xcccccc),
-            panel_border_width: px(1.5),
-            // Button colors
-            border_radius: px(6.),
-            primary_button: ButtonTheme::primary(),
-            normal_button: ButtonTheme::normal(),
-            // Font styles
-            title_font: FontTheme {
-                color: rgb(0x111111),
-                size: px(20.),
+            colors: ThemeColors {
+                background: BackgroundColors {
+                    canvas: rgb(0xeeeeee),
+                    surface: rgb(0xffffff),
+                    elevated: rgb(0xdddddd),
+                },
+                text: TextColors {
+                    primary: rgb(0x111111),
+                    secondary: rgb(0x333333),
+                    muted: rgb(0x777777),
+                    inverse: rgb(0xffffff),
+                },
+                border: BorderColors {
+                    subtle: rgb(0xcccccc),
+                },
+                accent: AccentColors {
+                    normal: rgb(0x224589),
+                    hover: rgb(0x2d56a0),
+                    active: rgb(0x19366d),
+                },
+                focus: rgb(0x224589),
             },
-            content_font: FontTheme {
-                color: rgb(0x333333),
-                size: px(16.),
+            typography: Typography {
+                title: px(20.),
+                content: px(16.),
             },
-
-            // Global colors
-            strike_color: rgb(0x224589),
+            radii: Radii {
+                small: px(4.),
+                medium: px(6.),
+                large: px(8.),
+            },
+            border_width: px(1.5),
             is_dark: false,
         }
     }
@@ -106,57 +167,3 @@ impl Default for Theme {
 }
 
 impl Global for Theme {}
-
-#[derive(Clone, Copy)]
-pub struct ButtonTheme {
-    pub normal: ColorTheme,
-    pub hover: ColorTheme,
-    pub click: ColorTheme,
-}
-
-impl ButtonTheme {
-    fn primary() -> Self {
-        Self {
-            normal: ColorTheme {
-                fg: rgb(0x000000),
-                bg: rgb(0xffffff),
-            },
-            hover: ColorTheme {
-                fg: rgb(0x000000),
-                bg: rgb(0xeeeeee),
-            },
-            click: ColorTheme {
-                fg: rgb(0x000000),
-                bg: rgb(0xcccccc),
-            },
-        }
-    }
-    fn normal() -> Self {
-        Self {
-            normal: ColorTheme {
-                fg: rgb(0xffffff),
-                bg: rgb(0x000000),
-            },
-            hover: ColorTheme {
-                fg: rgb(0xfffffff),
-                bg: rgb(0x101010),
-            },
-            click: ColorTheme {
-                fg: rgb(0xffffff),
-                bg: rgb(0x202020),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ColorTheme {
-    pub fg: Rgba,
-    pub bg: Rgba,
-}
-
-#[derive(Clone, Copy)]
-pub struct FontTheme {
-    pub color: Rgba,
-    pub size: Pixels,
-}

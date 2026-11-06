@@ -380,7 +380,7 @@ fn media_list(
                     .w_full()
                     .flex()
                     .justify_center()
-                    .rounded(theme.border_radius)
+                    .rounded(theme.radii.large)
                     .on_click(move |_event, _window, app| {
                         let _ = this.update(app, |library, cx| {
                             library.selected = Some(media.clone());
@@ -391,7 +391,7 @@ fn media_list(
                     .child(render_thumb(theme, thumb));
 
                 if is_selected {
-                    card = card.bg(theme.strike_color);
+                    card = card.bg(theme.colors.accent.normal);
                 }
 
                 div()
@@ -418,21 +418,21 @@ fn media_list(
 fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
     let bg = div()
         .size_full()
-        .rounded(theme.border_radius)
-        .bg(theme.normal_button.normal.bg)
+        .rounded(theme.radii.small)
+        .bg(theme.colors.background.surface)
         .flex()
         .items_center()
         .justify_center();
     match thumb {
         Some(ThumbnailState::Loaded(image)) => img(image)
             .h_full()
-            .rounded(px(4.))
+            .rounded(theme.radii.small)
             .object_fit(ObjectFit::Contain)
             .into_any_element(),
         Some(ThumbnailState::Failed) => bg
             .child(
                 Icon::new(assets::IconName::ImageOff)
-                    .text_color(theme.content_font.color)
+                    .text_color(theme.colors.text.secondary)
                     .size(px(32.)),
             )
             .into_any_element(),

@@ -112,7 +112,7 @@ impl Render for MainWindow {
             assets::IconName::Moon
         };
         let toggle = Button::new("theme-toggle")
-            .child(Icon::new(toggle_icon).text_color(theme.title_font.color))
+            .child(Icon::new(toggle_icon).text_color(theme.colors.text.primary))
             .on_click(move |_event, _window, cx| {
                 let current = get_theme(cx);
                 set_theme(
@@ -128,11 +128,7 @@ impl Render for MainWindow {
             .flex()
             .gap_4()
             .child(Text::new(self.title.clone()).content())
-            .child(
-                Text::new(self.path.to_string_lossy())
-                    .content()
-                    .opacity(0.6),
-            );
+            .child(Text::new(self.path.to_string_lossy()).muted());
         let title_bar = TitleBar::new().child(project_info).child(toggle);
         let library_panel = resizable_panel()
             .size_range(px(100.)..px(2400.))
@@ -152,7 +148,7 @@ impl Render for MainWindow {
         div()
             .v_flex()
             .size_full()
-            .bg(theme.window_background_color)
+            .bg(theme.colors.background.canvas)
             .child(title_bar)
             .child(
                 div().flex_1().min_h_0().child(
