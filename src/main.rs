@@ -1,14 +1,5 @@
-#[macro_use]
-mod logger;
-mod app;
-mod media;
-mod project;
-mod project_manager;
-mod render;
-mod thumbnail;
-mod ui;
-
-use crate::app::ColorGradeApp;
+use color_grade::app::ColorGradeApp;
+use color_grade::logger;
 
 use mimalloc::MiMalloc;
 

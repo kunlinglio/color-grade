@@ -1,4 +1,10 @@
 {
   "rust-analyzer.imports.granularity.group": "module",
   "rust-analyzer.imports.granularity.enforce": true,
+  "colorize.languages": [
+    "rust"
+  ],
+  "colorize.colorized_colors": [
+    "HEXA"
+  ],
 }

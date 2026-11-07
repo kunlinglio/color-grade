@@ -14,7 +14,8 @@ use crate::project::comm::ProjectRuntimeHandler;
 use crate::ui::components::{
     Button, Icon, Text, TitleBar, h_resizable, resizable_panel, v_resizable,
 };
-use crate::ui::{Theme, get_theme, set_theme};
+use crate::ui::theme::ColorTheme;
+use crate::ui::{get_theme, set_theme};
 
 pub struct MainWindow {
     title: String,
@@ -106,7 +107,7 @@ impl MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = get_theme(cx);
-        let toggle_icon = if theme.is_dark {
+        let toggle_icon = if theme.colors.is_dark {
             assets::IconName::Sun
         } else {
             assets::IconName::Moon
@@ -114,12 +115,14 @@ impl Render for MainWindow {
         let toggle = Button::new("theme-toggle")
             .child(Icon::new(toggle_icon).text_color(theme.colors.text.primary))
             .on_click(move |_event, _window, cx| {
-                let current = get_theme(cx);
+                let mut current = get_theme(cx);
                 set_theme(
-                    if current.is_dark {
-                        Theme::light()
+                    if current.colors.is_dark {
+                        current.colors = ColorTheme::light();
+                        current
                     } else {
-                        Theme::dark()
+                        current.colors = ColorTheme::dark();
+                        current
                     },
                     cx,
                 );
