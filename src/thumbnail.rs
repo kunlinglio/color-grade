@@ -12,7 +12,7 @@ use crate::media::hash::MediaHash;
 use crate::media::media_type::Media;
 use crate::render::RenderedFrame;
 
-const CACHE_CAPACITY: usize = 256;
+const CACHE_CAPACITY: usize = 128;
 
 /// The max size of thumbnail image.
 /// (size = max(height, width))

@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::ProjectRuntimeHandler;
+use crate::media::media_type::Media;
+use crate::project::{ProjectRuntimeHandler, WorkFlowDiff};
 use crate::ui::components::{Slider, Text};
 
 /// Color grading panel
@@ -13,7 +16,11 @@ pub struct Inspector {
 }
 
 impl Inspector {
-    pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
+    pub fn new(
+        cx: &mut Context<Self>,
+        runtime: ProjectRuntimeHandler,
+        selected: Entity<Option<Arc<Media>>>,
+    ) -> Self {
         let brightness = cx.new(|_cx| {
             SliderState::new()
                 .min(0.0)
@@ -31,15 +38,41 @@ impl Inspector {
 
         cx.subscribe(&brightness, |this, _state, event, _cx| {
             if let SliderEvent::Change(SliderValue::Single(value)) = event {
-                this.runtime.set_brightness(*value);
+                this.runtime.update_state(WorkFlowDiff::Brightness(*value));
             }
         })
         .detach();
 
         cx.subscribe(&saturation, |this, _state, event, _cx| {
             if let SliderEvent::Change(SliderValue::Single(value)) = event {
-                this.runtime.set_saturation(*value);
+                this.runtime.update_state(WorkFlowDiff::Saturation(*value));
             }
+        })
+        .detach();
+        cx.observe(&selected, |this, _selected, cx| {
+            let runtime = this.runtime.clone();
+            cx.spawn(async move |this, cx| {
+                let new = runtime.get_state().await;
+                let _ = this.update(cx, |this, cx| {
+                    this.brightness.write(
+                        cx,
+                        SliderState::new()
+                            .min(0.0)
+                            .max(2.0)
+                            .step(0.01)
+                            .default_value(new.brightness),
+                    );
+                    this.saturation.write(
+                        cx,
+                        SliderState::new()
+                            .min(0.0)
+                            .max(2.0)
+                            .step(0.01)
+                            .default_value(new.saturation),
+                    );
+                });
+            })
+            .detach();
         })
         .detach();
 

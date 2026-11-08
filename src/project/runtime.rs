@@ -10,7 +10,7 @@ use rayon::ThreadPool;
 
 use crate::media::comm::MediaSubscription;
 use crate::media::manager::MediaManager;
-use crate::project::session::Session;
+use crate::project::session::{Session, WorkFlow, WorkFlowDiff};
 use crate::render::Renderer;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::thumbnail::ThumbnailManager;
@@ -107,22 +107,21 @@ impl ProjectRuntime {
             Command::SubscribeThumbnailClient(tx) => {
                 let _ = tx.send(self.thumbnail_manager.client());
             }
-            Command::SetBrightness(brightness) => {
-                if let Some(session) = &mut self.opened {
-                    session.set_brightness(brightness);
-                }
-                self.re_render_current();
+            Command::GetState(tx) => {
+                let state = self.opened.as_ref().unwrap().get_workflow();
+                let _ = tx.send(state);
             }
-            Command::SetSaturation(saturation) => {
+            Command::UpdateState(diff) => {
                 if let Some(session) = &mut self.opened {
-                    session.set_saturation(saturation);
+                    if session.update(diff) {
+                        self.re_render_current();
+                    }
                 }
-                self.re_render_current();
             }
             Command::OpenMedia(path) => {
                 let Ok(editable) = Session::new(path.clone()) else {
                     error!("Failed to open media at {}", path.display());
-                    return;
+                    todo!("Handle media open failed");
                 };
                 self.renderer
                     .render(editable.gen_render_list(), editable.get_decoded());
@@ -168,20 +167,21 @@ impl ProjectRuntimeHandler {
             .expect("Project Runtime thread should not quit");
         rx.await.expect("Project Runtime thread should not quit")
     }
+    pub async fn get_state(&self) -> WorkFlow {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::GetState(tx))
+            .expect("Project Runtime thread should not quit");
+        rx.await.expect("Project Runtime thread should not quit")
+    }
+    pub fn update_state(&self, diff: WorkFlowDiff) {
+        self.cmd_sender
+            .unbounded_send(Command::UpdateState(diff))
+            .expect("Project Runtime thread should not quit");
+    }
     pub fn request_scope(&self, from: BackendFrame, width: usize, height: usize) {
         self.cmd_sender
             .unbounded_send(Command::RequestScope(from, width, height))
-            .expect("Project Runtime thread should not quit")
-    }
-    pub fn set_brightness(&self, brightness: f32) {
-        self.cmd_sender
-            .unbounded_send(Command::SetBrightness(brightness))
-            .expect("Project Runtime thread should not quit")
-    }
-
-    pub fn set_saturation(&self, saturation: f32) {
-        self.cmd_sender
-            .unbounded_send(Command::SetSaturation(saturation))
             .expect("Project Runtime thread should not quit")
     }
     pub async fn listen_on_media(&self) -> MediaSubscription {
@@ -207,15 +207,16 @@ impl ProjectRuntimeHandler {
 }
 
 pub enum Command {
-    // Request commands: Bringing a Sender
+    // Subscribe commands: Bringing a Sender
     SubscribeFrameStream(oneshot::Sender<FrameStream<(BackendFrame, Arc<RenderedFrame>)>>),
     SubscribeScope(oneshot::Sender<FrameStream<ScopeGraph>>),
-    RequestScope(BackendFrame, usize, usize),
     SubscribeMedia(oneshot::Sender<MediaSubscription>),
     SubscribeThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
-    // Notify commands
-    SetBrightness(f32),
-    SetSaturation(f32),
+    // Requests
+    RequestScope(BackendFrame, usize, usize),
+    // Sync commands: for syncing project state between UI and runtime
+    GetState(oneshot::Sender<WorkFlow>),
+    UpdateState(WorkFlowDiff),
     /// Open a new media.
     /// NOTE: This will discard old media
     OpenMedia(PathBuf),

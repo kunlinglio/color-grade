@@ -107,7 +107,7 @@ pub struct Library {
     /// The Arc<RenderImage> cannot free it's on GPU memory.
     /// So we pending drop it until we can access window.
     to_drop: Vec<Arc<RenderImage>>,
-    selected: Option<Arc<Media>>,
+    selected: Entity<Option<Arc<Media>>>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
     list_scroll_handle: UniformListScrollHandle,
@@ -116,12 +116,12 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn new(runtime: ProjectRuntimeHandler) -> Self {
+    pub fn new(runtime: ProjectRuntimeHandler, selected: Entity<Option<Arc<Media>>>) -> Self {
         Library {
             media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
             thumbnails: HashMap::new(),
             to_drop: Vec::new(),
-            selected: None,
+            selected: selected,
             runtime,
             client: None,
             list_scroll_handle: UniformListScrollHandle::new(),
@@ -257,7 +257,7 @@ impl Render for Library {
         let theme = get_theme(cx);
         let medias_len = self.media_list.list.len();
         let runtime = self.runtime.clone();
-        let selected = self.selected.clone();
+        let selected = self.selected.read(cx).clone();
         let this = cx.weak_entity();
         let this_for_select = this.clone();
         let this_for_resize = this.clone();
@@ -383,7 +383,10 @@ fn media_list(
                     .rounded(theme.radii.large)
                     .on_click(move |_event, _window, app| {
                         let _ = this.update(app, |library, cx| {
-                            library.selected = Some(media.clone());
+                            library.selected.update(cx, |selected, cx| {
+                                *selected = Some(media.clone());
+                                cx.notify();
+                            });
                             cx.notify();
                         });
                         runtime.open_media(&path);

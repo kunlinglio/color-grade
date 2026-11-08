@@ -32,21 +32,21 @@ impl Session {
         self.decoded.clone()
     }
 
-    /// Incrementally update a workflow parameter owned by this session.
-    pub fn set_brightness(&mut self, brightness: f32) {
-        self.workflow.brightness = brightness;
+    /// Return whether need to trigger rerender
+    pub fn update(&mut self, diff: WorkFlowDiff) -> bool {
+        self.workflow.apply_diff(diff)
     }
 
-    pub fn set_saturation(&mut self, saturation: f32) {
-        self.workflow.saturation = saturation;
+    pub fn get_workflow(&self) -> WorkFlow {
+        self.workflow.clone()
     }
 }
 
 /// The editable grade workflow, owned by the runtime's [`EditSession`].
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct WorkFlow {
-    brightness: f32,
-    saturation: f32,
+    pub brightness: f32,
+    pub saturation: f32,
 }
 
 impl Default for WorkFlow {
@@ -67,4 +67,18 @@ impl WorkFlow {
             ],
         }
     }
+    /// Return whether need to rerender
+    fn apply_diff(&mut self, diff: WorkFlowDiff) -> bool {
+        match diff {
+            WorkFlowDiff::Brightness(new) => self.brightness = new,
+            WorkFlowDiff::Saturation(new) => self.saturation = new,
+        }
+        true
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum WorkFlowDiff {
+    Brightness(f32),
+    Saturation(f32),
 }

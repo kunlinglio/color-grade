@@ -48,9 +48,11 @@ impl MainWindow {
             .unwrap_or("Unknown Project".to_string());
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
-        let library = cx.new(|_cx| library::Library::new(runtime.clone()));
+        // Selected media: shared between multiple panels
+        let selected = cx.new(|_cx| None);
+        let library = cx.new(|_cx| library::Library::new(runtime.clone(), selected.clone()));
         let nodes = cx.new(|_cx| nodes::Nodes::new());
-        let grading = cx.new(|cx| inspector::Inspector::new(cx, runtime.clone()));
+        let grading = cx.new(|cx| inspector::Inspector::new(cx, runtime.clone(), selected.clone()));
         let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
             path,
