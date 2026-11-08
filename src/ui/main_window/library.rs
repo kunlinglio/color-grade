@@ -243,6 +243,7 @@ impl Library {
 
         self.thumbnail_size = new;
         for (_, state) in self.thumbnails.drain() {
+            // TODO: Avoid show loading item when fetching new thumbs
             if let ThumbnailState::Loaded(image) = state {
                 self.to_drop.push(image);
             }

@@ -81,8 +81,10 @@ impl ProjectRuntime {
 
     fn re_render_current(&self) {
         if let Some(session) = &self.opened {
-            self.renderer
-                .render(session.gen_render_list(), session.get_decoded());
+            match session.gen_render_list() {
+                Ok(render_list) => self.renderer.render(render_list, session.get_decoded()),
+                Err(err) => error!("Failed to compile render list: {err:#}"),
+            }
         }
     }
 
@@ -123,8 +125,14 @@ impl ProjectRuntime {
                     error!("Failed to open media at {}", path.display());
                     todo!("Handle media open failed");
                 };
-                self.renderer
-                    .render(editable.gen_render_list(), editable.get_decoded());
+                let render_list = match editable.gen_render_list() {
+                    Ok(render_list) => render_list,
+                    Err(err) => {
+                        error!("Failed to compile render list: {err:#}");
+                        return;
+                    }
+                };
+                self.renderer.render(render_list, editable.get_decoded());
                 self.opened = Some(editable);
             }
         }
