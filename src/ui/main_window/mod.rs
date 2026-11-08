@@ -24,7 +24,7 @@ pub struct MainWindow {
     monitor: Entity<monitor::Monitor>,
     library: Entity<library::Library>,
     nodes: Entity<nodes::Nodes>,
-    grading: Entity<inspector::Inspector>,
+    inspector: Entity<inspector::Inspector>,
     scopes: Entity<scopes::Scopes>,
     /// Handler for communicating with ProjectRuntime
     runtime: ProjectRuntimeHandler,
@@ -49,10 +49,26 @@ impl MainWindow {
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         // Selected media: shared between multiple panels
-        let selected = cx.new(|_cx| None);
-        let library = cx.new(|_cx| library::Library::new(runtime.clone(), selected.clone()));
-        let nodes = cx.new(|cx| nodes::Nodes::new(cx, runtime.clone(), selected.clone()));
-        let grading = cx.new(|cx| inspector::Inspector::new(cx, runtime.clone(), selected.clone()));
+        let selected_media = cx.new(|_cx| None);
+        // Selected node's id: shared between multiple panels
+        let selected_nodeid = cx.new(|_cx| None);
+        let library = cx.new(|_cx| library::Library::new(runtime.clone(), selected_media.clone()));
+        let nodes = cx.new(|cx| {
+            nodes::Nodes::new(
+                cx,
+                runtime.clone(),
+                selected_media.clone(),
+                selected_nodeid.clone(),
+            )
+        });
+        let inspector = cx.new(|cx| {
+            inspector::Inspector::new(
+                cx,
+                runtime.clone(),
+                selected_media.clone(),
+                selected_nodeid.clone(),
+            )
+        });
         let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
             path,
@@ -60,7 +76,7 @@ impl MainWindow {
             monitor,
             library,
             nodes,
-            grading,
+            inspector,
             scopes,
             runtime,
         }
@@ -145,7 +161,7 @@ impl Render for MainWindow {
             .child(self.nodes.clone());
         let grading_panel = resizable_panel()
             .size_range(px(200.)..px(2400.))
-            .child(self.grading.clone());
+            .child(self.inspector.clone());
         let scopes_panel = resizable_panel()
             .size_range(px(200.)..px(2400.))
             .child(self.scopes.clone());

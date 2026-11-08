@@ -46,10 +46,10 @@ impl Session {
     }
 }
 
-type NodeId = u64;
+pub type NodeId = u64;
 
 /// The editable grade workflow, owned by the runtime's [`EditSession`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WorkFlow {
     pub version: u64,
     pub nodes: Vec<Node>,
@@ -74,20 +74,20 @@ impl NodeIdAlloc {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Node {
     pub node_id: NodeId,
     pub attr: NodeAttr,
     pub pos: (f32, f32),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum NodeAttr {
     Normal { brightness: f32, saturation: f32 },
     Merge { blend_mode: BlendMode },

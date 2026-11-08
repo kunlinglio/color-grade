@@ -225,24 +225,9 @@ mod kernel {
             background.height
         );
 
-        let mut out = ScalarFrame::new(foreground.width, foreground.height);
-        match mode {
-            BlendMode::Top => {
-                for ((dst, fg), bg) in out
-                    .rgba
-                    .chunks_exact_mut(4)
-                    .zip(foreground.rgba.chunks_exact(4))
-                    .zip(background.rgba.chunks_exact(4))
-                {
-                    let alpha = fg[3] / MAX;
-                    dst[0] = fg[0] * alpha + bg[0] * (1.0 - alpha);
-                    dst[1] = fg[1] * alpha + bg[1] * (1.0 - alpha);
-                    dst[2] = fg[2] * alpha + bg[2] * (1.0 - alpha);
-                    dst[3] = MAX;
-                }
-            }
-        }
-        Ok(out)
+        Ok(match mode {
+            BlendMode::Top => foreground.clone(),
+        })
     }
 
     pub(super) fn histogram(
