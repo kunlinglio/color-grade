@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
@@ -7,16 +8,17 @@ use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
 use rayon::ThreadPool;
 
+use crate::media::comm::MediaSubscription;
 use crate::media::manager::MediaManager;
-use crate::project::edit_session::EditSession;
+use crate::project::session::Session;
 use crate::render::Renderer;
+use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::thumbnail::ThumbnailManager;
-
-use super::comm::{Command, ProjectRuntimeHandler};
+use crate::thumbnail::ThumbnailManagerClient;
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
-    opened: Option<EditSession>,
+    opened: Option<Session>,
     // Services
     renderer: Renderer,
     media_manager: MediaManager,
@@ -102,7 +104,7 @@ impl ProjectRuntime {
                 let updater = self.media_manager.subscribe();
                 let _ = tx.send(updater);
             }
-            Command::ReqThumbnailClient(tx) => {
+            Command::SubscribeThumbnailClient(tx) => {
                 let _ = tx.send(self.thumbnail_manager.client());
             }
             Command::SetBrightness(brightness) => {
@@ -118,7 +120,7 @@ impl ProjectRuntime {
                 self.re_render_current();
             }
             Command::OpenMedia(path) => {
-                let Ok(editable) = EditSession::new(path.clone()) else {
+                let Ok(editable) = Session::new(path.clone()) else {
                     error!("Failed to open media at {}", path.display());
                     return;
                 };
@@ -142,4 +144,79 @@ impl ProjectRuntimeThread {
             error!("ProjectRuntime thread panicked during shutdown!")
         }
     }
+}
+
+/// Communicate handler from the UI and the ProjectRuntime
+#[derive(Clone)]
+pub struct ProjectRuntimeHandler {
+    pub(super) cmd_sender: mpsc::UnboundedSender<Command>,
+}
+
+impl ProjectRuntimeHandler {
+    pub async fn subscribe_frame_stream(&self) -> FrameStream<(BackendFrame, Arc<RenderedFrame>)> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::SubscribeFrameStream(tx))
+            .expect("Project Runtime thread should not quit");
+        let frame_stream = rx.await.expect("Project Runtime thread should not quit");
+        frame_stream
+    }
+    pub async fn subscribe_scope(&self) -> FrameStream<ScopeGraph> {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::SubscribeScope(tx))
+            .expect("Project Runtime thread should not quit");
+        rx.await.expect("Project Runtime thread should not quit")
+    }
+    pub fn request_scope(&self, from: BackendFrame, width: usize, height: usize) {
+        self.cmd_sender
+            .unbounded_send(Command::RequestScope(from, width, height))
+            .expect("Project Runtime thread should not quit")
+    }
+    pub fn set_brightness(&self, brightness: f32) {
+        self.cmd_sender
+            .unbounded_send(Command::SetBrightness(brightness))
+            .expect("Project Runtime thread should not quit")
+    }
+
+    pub fn set_saturation(&self, saturation: f32) {
+        self.cmd_sender
+            .unbounded_send(Command::SetSaturation(saturation))
+            .expect("Project Runtime thread should not quit")
+    }
+    pub async fn listen_on_media(&self) -> MediaSubscription {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::SubscribeMedia(tx))
+            .expect("Project Runtime thread should not quit");
+        let media_updater = rx.await.expect("Project Runtime thread should not quit");
+        media_updater
+    }
+    pub async fn subscribe_thumbnails(&self) -> ThumbnailManagerClient {
+        let (tx, rx) = oneshot::channel();
+        self.cmd_sender
+            .unbounded_send(Command::SubscribeThumbnailClient(tx))
+            .expect("Project Runtime thread should not quit");
+        rx.await.expect("Project Runtime thread should not quit")
+    }
+    pub fn open_media(&self, path: &Path) {
+        self.cmd_sender
+            .unbounded_send(Command::OpenMedia(path.to_path_buf()))
+            .expect("Project Runtime thread should not quit")
+    }
+}
+
+pub enum Command {
+    // Request commands: Bringing a Sender
+    SubscribeFrameStream(oneshot::Sender<FrameStream<(BackendFrame, Arc<RenderedFrame>)>>),
+    SubscribeScope(oneshot::Sender<FrameStream<ScopeGraph>>),
+    RequestScope(BackendFrame, usize, usize),
+    SubscribeMedia(oneshot::Sender<MediaSubscription>),
+    SubscribeThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
+    // Notify commands
+    SetBrightness(f32),
+    SetSaturation(f32),
+    /// Open a new media.
+    /// NOTE: This will discard old media
+    OpenMedia(PathBuf),
 }

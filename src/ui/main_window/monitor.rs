@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::comm::ProjectRuntimeHandler;
+use crate::project::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame};
 use crate::ui::components::{Icon, Text};
 use crate::ui::get_theme;

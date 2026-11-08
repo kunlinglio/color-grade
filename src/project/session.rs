@@ -5,12 +5,12 @@ use crate::render::Frame;
 use crate::render::{Op, RenderList};
 
 /// A opened or edited media inside a project.
-pub struct EditSession {
+pub struct Session {
     workflow: WorkFlow,
     decoded: Arc<Frame>,
 }
 
-impl EditSession {
+impl Session {
     pub fn new(path: PathBuf) -> anyhow::Result<Self> {
         let img = image::ImageReader::open(&path)?
             .with_guessed_format()?
@@ -18,7 +18,7 @@ impl EditSession {
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
         let decoded_frame = Arc::new(Frame::new(width as usize, height as usize, rgba.to_vec()));
-        Ok(EditSession {
+        Ok(Session {
             workflow: WorkFlow::default(),
             decoded: decoded_frame,
         })

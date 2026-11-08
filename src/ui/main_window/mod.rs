@@ -1,4 +1,4 @@
-mod grading;
+mod inspector;
 mod library;
 mod monitor;
 mod nodes;
@@ -10,7 +10,7 @@ use gpui_kit::base::StyledExt as _;
 use gpui_kit::*;
 
 use crate::app::ColorGradeApp;
-use crate::project::comm::ProjectRuntimeHandler;
+use crate::project::ProjectRuntimeHandler;
 use crate::ui::components::{
     Button, Icon, Text, TitleBar, h_resizable, resizable_panel, v_resizable,
 };
@@ -24,7 +24,7 @@ pub struct MainWindow {
     monitor: Entity<monitor::Monitor>,
     library: Entity<library::Library>,
     nodes: Entity<nodes::Nodes>,
-    grading: Entity<grading::Grading>,
+    grading: Entity<inspector::Inspector>,
     scopes: Entity<scopes::Scopes>,
     /// Handler for communicating with ProjectRuntime
     runtime: ProjectRuntimeHandler,
@@ -50,7 +50,7 @@ impl MainWindow {
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let library = cx.new(|_cx| library::Library::new(runtime.clone()));
         let nodes = cx.new(|_cx| nodes::Nodes::new());
-        let grading = cx.new(|cx| grading::Grading::new(cx, runtime.clone()));
+        let grading = cx.new(|cx| inspector::Inspector::new(cx, runtime.clone()));
         let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
             path,

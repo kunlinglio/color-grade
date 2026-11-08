@@ -2,17 +2,17 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::comm::ProjectRuntimeHandler;
+use crate::project::ProjectRuntimeHandler;
 use crate::ui::components::{Slider, Text};
 
 /// Color grading panel
-pub struct Grading {
+pub struct Inspector {
     runtime: ProjectRuntimeHandler,
     brightness: Entity<SliderState>,
     saturation: Entity<SliderState>,
 }
 
-impl Grading {
+impl Inspector {
     pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
         let brightness = cx.new(|_cx| {
             SliderState::new()
@@ -43,7 +43,7 @@ impl Grading {
         })
         .detach();
 
-        Grading {
+        Inspector {
             runtime,
             brightness,
             saturation,
@@ -51,14 +51,14 @@ impl Grading {
     }
 }
 
-impl Render for Grading {
+impl Render for Inspector {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .v_flex()
             .size_full()
             .p_4()
             .gap_4()
-            .child(Text::new("Grading").title())
+            .child(Text::new("Inspector").title())
             .child(
                 div()
                     .v_flex()

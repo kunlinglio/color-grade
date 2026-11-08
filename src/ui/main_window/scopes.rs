@@ -4,7 +4,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use strum::EnumIter;
 
-use crate::project::comm::ProjectRuntimeHandler;
+use crate::project::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::ui::components::{ResizeSensitive, SelectOption, SingleSelect, Text};
 use crate::ui::get_theme;

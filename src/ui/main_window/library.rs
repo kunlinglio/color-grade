@@ -10,7 +10,7 @@ use strum::EnumIter;
 use crate::media;
 use crate::media::comm::MediaSubscription;
 use crate::media::media_type::Media;
-use crate::project::comm::ProjectRuntimeHandler;
+use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
 use crate::ui::components::{Icon, Loading, ResizeSensitive, SelectOption, SingleSelect, Text};
 use crate::ui::{Theme, get_theme};

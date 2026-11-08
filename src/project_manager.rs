@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use rayon::ThreadPool;
 
-use crate::project::comm::ProjectRuntimeHandler;
-use crate::project::runtime::{ProjectRuntime, ProjectRuntimeThread};
+use crate::project::ProjectRuntimeHandler;
+use crate::project::{ProjectRuntime, ProjectRuntimeThread};
 
 pub struct ProjectManager {
     /// Project Name -> Project Runtime Handler
