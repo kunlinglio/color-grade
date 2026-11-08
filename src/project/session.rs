@@ -406,11 +406,7 @@ impl WorkFlowCompiler {
 
     fn compile(mut self, workflow: &WorkFlow) -> anyhow::Result<RenderList> {
         let graph = WorkFlowGraph::build(workflow)?;
-        self.reachable = graph
-            .ancestors_of_output()
-            .intersection(&graph.reachable_from_inputs())
-            .copied()
-            .collect();
+        self.reachable = graph.ancestors_of_output();
         if self.reachable.len() == 0 {
             bail!("The graph is not connective")
         }
@@ -505,6 +501,9 @@ impl WorkFlowCompiler {
                     self.allocator.dup(operands[0])
                 };
                 for next in graph.successors_of(index) {
+                    if !self.reachable.contains(next) {
+                        continue;
+                    }
                     self.workset
                         .entry(*next)
                         .or_default()
@@ -524,6 +523,7 @@ impl WorkFlowCompiler {
                     operands.len()
                 );
                 let output = self.allocator.alloc();
+                // FIXME: the sequence of operands is not reliable.
                 self.ops.push(Op::Merge {
                     fg: operands[0],
                     bg: operands[1],
@@ -531,6 +531,9 @@ impl WorkFlowCompiler {
                     mode: *blend_mode,
                 });
                 for next in graph.successors_of(index) {
+                    if !self.reachable.contains(next) {
+                        continue;
+                    }
                     self.workset
                         .entry(*next)
                         .or_default()

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use super::render_list::{Op, RenderList};
+use anyhow::{Context, bail};
+
+use super::render_list::{Op, RenderList, Slot};
 use super::renderer::RendererBackend;
 use super::renderer::ScopeGraph;
 use super::{BackendFrame, Frame, RenderedFrame};
@@ -14,6 +16,106 @@ impl ScalarBackend {
     pub fn new() -> Self {
         Self {}
     }
+
+    fn execute(list: RenderList, from: &Frame) -> anyhow::Result<ScalarFrame> {
+        list.verify().context("invalid render list")?;
+        let RenderList {
+            slot_count,
+            ops,
+            input,
+            output,
+        } = list;
+
+        // Slots are stored as `Option<ScalarFrame>` so that reading a slot that was
+        // never written is reported instead of silently producing garbage.
+        let mut slots: Vec<Option<ScalarFrame>> = vec![None; slot_count];
+
+        // Prepare input
+        let input_index = input.id() as usize;
+        let seed = slots.get_mut(input_index).with_context(|| {
+            format!("input slot {input_index} out of range (slot_count = {slot_count})")
+        })?;
+        *seed = Some(ScalarFrame::from_frame(from));
+
+        // Execute body
+        for (op_index, op) in ops.iter().enumerate() {
+            match op {
+                Op::Copy { from, to } => {
+                    let value = read_slot(&slots, *from, op_index, "from")?.clone();
+                    write_slot(&mut slots, *to, value, op_index)?;
+                }
+                Op::Brightness {
+                    from,
+                    to,
+                    brightness,
+                } => {
+                    let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
+                    kernel::change_brightness(&mut value, *brightness);
+                    write_slot(&mut slots, *to, value, op_index)?;
+                }
+                Op::Saturation {
+                    from,
+                    to,
+                    saturation,
+                } => {
+                    let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
+                    kernel::change_saturation(&mut value, *saturation);
+                    write_slot(&mut slots, *to, value, op_index)?;
+                }
+                Op::Merge { fg, bg, to, mode } => {
+                    let foreground = read_slot(&slots, *fg, op_index, "fg")?;
+                    let background = read_slot(&slots, *bg, op_index, "bg")?;
+                    let value = kernel::merge(foreground, background, *mode)?;
+                    write_slot(&mut slots, *to, value, op_index)?;
+                }
+            }
+        }
+
+        // Take output
+        let output_index = output.id() as usize;
+        let len = slots.len();
+        slots
+            .get_mut(output_index)
+            .with_context(|| {
+                format!("output slot {output_index} out of range (slot_count = {len})")
+            })?
+            .take()
+            .with_context(|| format!("output slot {output_index} was never written"))
+    }
+}
+
+/// Read a slot, failing if it is out of range or was never written.
+fn read_slot<'a>(
+    slots: &'a [Option<ScalarFrame>],
+    slot: Slot,
+    op_index: usize,
+    name: &str,
+) -> anyhow::Result<&'a ScalarFrame> {
+    let index = slot.id() as usize;
+    match slots.get(index) {
+        Some(Some(frame)) => Ok(frame),
+        Some(None) => bail!("op #{op_index} reads uninitialized slot {index} ({name})"),
+        None => bail!(
+            "op #{op_index} reads {name} slot {index} out of range (slot_count = {})",
+            slots.len()
+        ),
+    }
+}
+
+/// Write a slot, failing if it is out of range.
+fn write_slot(
+    slots: &mut [Option<ScalarFrame>],
+    slot: Slot,
+    frame: ScalarFrame,
+    op_index: usize,
+) -> anyhow::Result<()> {
+    let index = slot.id() as usize;
+    let len = slots.len();
+    let dst = slots.get_mut(index).with_context(|| {
+        format!("op #{op_index} writes slot {index} out of range (slot_count = {len})")
+    })?;
+    *dst = Some(frame);
+    Ok(())
 }
 
 impl RendererBackend for ScalarBackend {
@@ -22,17 +124,8 @@ impl RendererBackend for ScalarBackend {
         list: RenderList,
         from: Arc<Frame>,
     ) -> (BackendFrame, Arc<RenderedFrame>) {
-        let mut buffer = ScalarFrame::from_frame(&from);
-        for op in list.ops {
-            match op {
-                Op::Brightness(b) => {
-                    kernel::change_brightness(&mut buffer, b);
-                }
-                Op::Saturation(s) => {
-                    kernel::change_saturation(&mut buffer, s);
-                }
-            }
-        }
+        let buffer = Self::execute(list, from.as_ref())
+            .unwrap_or_else(|err| panic!("scalar backend failed to render: {err:#}"));
         let rendered = RenderedFrame::from_frame(buffer.to_frame());
         (BackendFrame::new(buffer), Arc::new(rendered))
     }
@@ -52,6 +145,7 @@ impl RendererBackend for ScalarBackend {
 }
 
 /// Intermediate frame representation used between processing steps.
+#[derive(Clone, Debug)]
 struct ScalarFrame {
     width: usize,
     height: usize,
@@ -89,7 +183,7 @@ impl ScalarFrame {
 
 mod kernel {
     use super::ScalarFrame;
-    use crate::render::RenderedFrame;
+    use crate::render::{BlendMode, RenderedFrame};
 
     const MAX: f32 = 255.0;
 
@@ -114,6 +208,41 @@ mod kernel {
             px[1] = y + s * (px[1] - y);
             px[2] = y + s * (px[2] - y);
         }
+    }
+
+    /// Composite `foreground` over `background` using `mode`
+    pub(super) fn merge(
+        foreground: &ScalarFrame,
+        background: &ScalarFrame,
+        mode: BlendMode,
+    ) -> anyhow::Result<ScalarFrame> {
+        anyhow::ensure!(
+            foreground.width == background.width && foreground.height == background.height,
+            "cannot merge frames of different sizes: {}x{} and {}x{}",
+            foreground.width,
+            foreground.height,
+            background.width,
+            background.height
+        );
+
+        let mut out = ScalarFrame::new(foreground.width, foreground.height);
+        match mode {
+            BlendMode::Top => {
+                for ((dst, fg), bg) in out
+                    .rgba
+                    .chunks_exact_mut(4)
+                    .zip(foreground.rgba.chunks_exact(4))
+                    .zip(background.rgba.chunks_exact(4))
+                {
+                    let alpha = fg[3] / MAX;
+                    dst[0] = fg[0] * alpha + bg[0] * (1.0 - alpha);
+                    dst[1] = fg[1] * alpha + bg[1] * (1.0 - alpha);
+                    dst[2] = fg[2] * alpha + bg[2] * (1.0 - alpha);
+                    dst[3] = MAX;
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub(super) fn histogram(
