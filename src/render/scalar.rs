@@ -41,6 +41,7 @@ impl ScalarBackend {
         for (op_index, op) in ops.iter().enumerate() {
             match op {
                 Op::Copy { from, to } => {
+                    assert_ne!(from, to);
                     let value = read_slot(&slots, *from, op_index, "from")?.clone();
                     write_slot(&mut slots, *to, value, op_index)?;
                 }
@@ -49,18 +50,32 @@ impl ScalarBackend {
                     to,
                     brightness,
                 } => {
-                    let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
-                    kernel::change_brightness(&mut value, *brightness);
-                    write_slot(&mut slots, *to, value, op_index)?;
+                    if from == to {
+                        kernel::change_brightness(
+                            slot_mut(&mut slots, *to, op_index, "to")?,
+                            *brightness,
+                        );
+                    } else {
+                        let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
+                        kernel::change_brightness(&mut value, *brightness);
+                        write_slot(&mut slots, *to, value, op_index)?;
+                    }
                 }
                 Op::Saturation {
                     from,
                     to,
                     saturation,
                 } => {
-                    let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
-                    kernel::change_saturation(&mut value, *saturation);
-                    write_slot(&mut slots, *to, value, op_index)?;
+                    if from == to {
+                        kernel::change_saturation(
+                            slot_mut(&mut slots, *to, op_index, "to")?,
+                            *saturation,
+                        );
+                    } else {
+                        let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
+                        kernel::change_saturation(&mut value, *saturation);
+                        write_slot(&mut slots, *to, value, op_index)?;
+                    }
                 }
                 Op::Merge { fg, bg, to, mode } => {
                     let foreground = read_slot(&slots, *fg, op_index, "fg")?;
@@ -99,6 +114,24 @@ fn read_slot<'a>(
             "op #{op_index} reads {name} slot {index} out of range (slot_count = {})",
             slots.len()
         ),
+    }
+}
+
+/// Get mutable access to an initialized slot, for in-place ops.
+fn slot_mut<'a>(
+    slots: &'a mut [Option<ScalarFrame>],
+    slot: Slot,
+    op_index: usize,
+    name: &str,
+) -> anyhow::Result<&'a mut ScalarFrame> {
+    let index = slot.id() as usize;
+    let len = slots.len();
+    let cell = slots.get_mut(index).with_context(|| {
+        format!("op #{op_index} writes {name} slot {index} out of range (slot_count = {len})")
+    })?;
+    match cell {
+        Some(frame) => Ok(frame),
+        None => bail!("op #{op_index} modifies uninitialized slot {index} ({name})"),
     }
 }
 

@@ -289,7 +289,7 @@ impl<'a> WorkFlowGraph<'a> {
         &self.workflow.nodes[index]
     }
 
-    fn predecessors_of(&self, index: usize) -> &[usize] {
+    fn _predecessors_of(&self, index: usize) -> &[usize] {
         &self.predecessors[index]
     }
 
@@ -304,7 +304,7 @@ impl<'a> WorkFlowGraph<'a> {
     fn output(&self) -> usize {
         self.output
     }
-    fn reachable_from_inputs(&self) -> HashSet<usize> {
+    fn _reachable_from_inputs(&self) -> HashSet<usize> {
         let mut seen = HashSet::new();
         let mut stack = Vec::new();
         for &index in &self.inputs {
@@ -451,7 +451,7 @@ impl WorkFlowCompiler {
         };
         result
             .verify()
-            .context("compiled to an illegal render list")?;
+            .with_context(|| format!("compiled to an illegal render list {:?}", result))?;
         Ok(result)
     }
 

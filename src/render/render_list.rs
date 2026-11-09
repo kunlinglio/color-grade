@@ -60,8 +60,8 @@ pub enum Op {
 impl RenderList {
     /// Verify that every op only uses in-range slots and is well formed.
     pub fn verify(&self) -> anyhow::Result<()> {
-        self.check_slot(&self.input, "input");
-        self.check_slot(&self.output, "output");
+        self.check_slot(&self.input, "input")?;
+        self.check_slot(&self.output, "output")?;
         for (index, op) in self.ops.iter().enumerate() {
             self.verify_op(op)
                 .with_context(|| format!("invalid op #{index}: {op:?}"))?;
@@ -74,6 +74,7 @@ impl RenderList {
             Op::Copy { from, to } => {
                 self.check_slot(from, "from")?;
                 self.check_slot(to, "to")?;
+                anyhow::ensure!(from != to, "Copy op's 'from' and 'to' are same slot")
             }
             Op::Brightness { from, to, .. } | Op::Saturation { from, to, .. } => {
                 self.check_slot(from, "from")?;
