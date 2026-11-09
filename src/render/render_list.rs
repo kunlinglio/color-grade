@@ -74,12 +74,10 @@ impl RenderList {
             Op::Copy { from, to } => {
                 self.check_slot(from, "from")?;
                 self.check_slot(to, "to")?;
-                anyhow::ensure!(from != to, "from and to must be different slots");
             }
             Op::Brightness { from, to, .. } | Op::Saturation { from, to, .. } => {
                 self.check_slot(from, "from")?;
                 self.check_slot(to, "to")?;
-                anyhow::ensure!(from != to, "from and to must be different slots");
             }
             Op::Merge { fg, bg, to, .. } => {
                 self.check_slot(fg, "fg")?;

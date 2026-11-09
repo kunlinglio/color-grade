@@ -391,6 +391,10 @@ impl SlotAllocator {
         );
         self.using_slots[index] -= 1;
     }
+    fn is_own(&self, slot: &Slot) -> bool {
+        let index = slot.id();
+        self.using_slots[index as usize] == 1
+    }
 }
 
 impl WorkFlowCompiler {
@@ -404,6 +408,7 @@ impl WorkFlowCompiler {
         }
     }
 
+    /// TODO: Clarify stages for compiler
     fn compile(mut self, workflow: &WorkFlow) -> anyhow::Result<RenderList> {
         let graph = WorkFlowGraph::build(workflow)?;
         self.reachable = graph.ancestors_of_output();
@@ -435,7 +440,7 @@ impl WorkFlowCompiler {
         // Epilogue
         let output = {
             let result_slot = self.output_slot.expect("Should find output");
-            self.allocator.free(result_slot);
+            // Let output slot leak
             result_slot
         };
         let result = RenderList {
@@ -467,38 +472,51 @@ impl WorkFlowCompiler {
                     operands.len()
                 );
                 let output = if *brightness != 1.0 && *saturation != 1.0 {
-                    let medium = self.allocator.alloc();
-                    let output = self.allocator.alloc();
+                    let output = if self.allocator.is_own(&operands[0]) {
+                        self.allocator.dup(operands[0])
+                    } else {
+                        self.allocator.alloc()
+                    };
                     self.ops.push(Op::Brightness {
                         from: operands[0],
-                        to: medium,
+                        to: output,
                         brightness: *brightness,
                     });
+                    self.allocator.free(operands[0]);
                     self.ops.push(Op::Saturation {
-                        from: medium,
+                        from: output,
                         to: output,
                         saturation: *saturation,
                     });
-                    self.allocator.free(medium);
                     output
                 } else if *brightness != 1.0 {
-                    let output = self.allocator.alloc();
+                    let output = if self.allocator.is_own(&operands[0]) {
+                        self.allocator.dup(operands[0])
+                    } else {
+                        self.allocator.alloc()
+                    };
                     self.ops.push(Op::Brightness {
                         from: operands[0],
                         to: output,
                         brightness: *brightness,
                     });
+                    self.allocator.free(operands[0]);
                     output
                 } else if *saturation != 1.0 {
-                    let output = self.allocator.alloc();
+                    let output = if self.allocator.is_own(&operands[0]) {
+                        self.allocator.dup(operands[0])
+                    } else {
+                        self.allocator.alloc()
+                    };
                     self.ops.push(Op::Saturation {
                         from: operands[0],
                         to: output,
                         saturation: *saturation,
                     });
+                    self.allocator.free(operands[0]);
                     output
                 } else {
-                    self.allocator.dup(operands[0])
+                    operands[0]
                 };
                 for next in graph.successors_of(index) {
                     if !self.reachable.contains(next) {
@@ -512,7 +530,6 @@ impl WorkFlowCompiler {
                 if graph.output() == index {
                     self.output_slot = Some(self.allocator.dup(output));
                 }
-                self.allocator.free(operands[0]);
                 self.allocator.free(output);
             }
             NodeAttr::Merge { blend_mode } => {
