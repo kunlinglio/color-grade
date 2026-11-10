@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use anyhow::Context;
 
@@ -154,6 +155,51 @@ struct IR {
     output: ValueId,
 }
 
+impl fmt::Display for IR {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "ir(%{}) {{", self.input.0)?;
+
+        for instruction in &self.instructions {
+            write!(f, "  %{} = ", instruction.output.0)?;
+            match &instruction.operation {
+                IROperation::Pointwise(operations) => {
+                    write!(f, "pointwise [")?;
+                    for (operation_index, operation) in operations.iter().enumerate() {
+                        if operation_index != 0 {
+                            write!(f, ", ")?;
+                        }
+                        match operation {
+                            PointwiseOp::Brightness(value) => {
+                                write!(f, "brightness({value:?})")?;
+                            }
+                            PointwiseOp::Saturation(value) => {
+                                write!(f, "saturation({value:?})")?;
+                            }
+                        }
+                    }
+                    write!(f, "]")?;
+                }
+                IROperation::Merge(mode) => match mode {
+                    BlendMode::Top => write!(f, "merge.top")?,
+                },
+            }
+
+            for (input_index, input) in instruction.inputs.iter().enumerate() {
+                if input_index == 0 {
+                    write!(f, " ")?;
+                } else {
+                    write!(f, ", ")?;
+                }
+                write!(f, "%{}", input.0)?;
+            }
+            writeln!(f)?;
+        }
+
+        writeln!(f, "  ret %{}", self.output.0)?;
+        write!(f, "}}")
+    }
+}
+
 impl IR {
     fn new() -> Self {
         let input = ValueId(0);
@@ -259,15 +305,15 @@ impl IR {
     }
 }
 
-struct Lowerer<'graph, 'workflow> {
-    graph: &'graph WorkFlowGraph<'workflow>,
+struct Lowerer<'graph> {
+    graph: &'graph WorkFlowGraph<'graph>,
     ir: IR,
     workset: HashMap<usize, Vec<ValueId>>,
     reachable: HashSet<usize>,
 }
 
-impl<'graph, 'workflow> Lowerer<'graph, 'workflow> {
-    fn new(graph: &'graph WorkFlowGraph<'workflow>) -> Self {
+impl<'graph> Lowerer<'graph> {
+    fn new(graph: &'graph WorkFlowGraph<'graph>) -> Self {
         let reachable = graph.ancestors_of_output();
         Self {
             graph,
@@ -568,6 +614,66 @@ mod tests {
             input_to: vec![0, 9],
             output_from: 18,
         }
+    }
+
+    fn lower(workflow: &WorkFlow) -> IR {
+        let graph = WorkFlowGraph::build(workflow).unwrap();
+        Lowerer::new(&graph).lower().unwrap()
+    }
+
+    #[test]
+    fn prints_ir_as_a_function() {
+        assert_eq!(
+            format!("{}", lower(&WorkFlow::default())),
+            "ir(%0) {\n  ret %0\n}"
+        );
+
+        let workflow = WorkFlow {
+            version: 0,
+            nodes: vec![normal(0, 1.25, 1.0), normal(1, 1.0, 0.75)],
+            edges: vec![Edge { from: 0, to: 1 }],
+            input_to: vec![0],
+            output_from: 1,
+        };
+        assert_eq!(
+            format!("{}", lower(&workflow)),
+            concat!(
+                "ir(%0) {\n",
+                "  %1 = pointwise [brightness(1.25)] %0\n",
+                "  %2 = pointwise [saturation(0.75)] %1\n",
+                "  ret %2\n",
+                "}",
+            )
+        );
+
+        let workflow = WorkFlow {
+            version: 0,
+            nodes: vec![
+                normal(0, 1.25, 1.0),
+                normal(1, 1.0, 0.75),
+                Node {
+                    node_id: 2,
+                    attr: NodeAttr::Merge {
+                        blend_mode: BlendMode::Top,
+                    },
+                    pos: (0.0, 0.0),
+                },
+            ],
+            edges: vec![Edge { from: 0, to: 2 }, Edge { from: 1, to: 2 }],
+            input_to: vec![0, 1],
+            output_from: 2,
+        };
+        assert_eq!(
+            format!("{}", lower(&workflow)),
+            concat!(
+                "ir(%0) {\n",
+                "  %1 = pointwise [saturation(0.75)] %0\n",
+                "  %2 = pointwise [brightness(1.25)] %0\n",
+                "  %3 = merge.top %1, %2\n",
+                "  ret %3\n",
+                "}",
+            )
+        );
     }
 
     #[test]
