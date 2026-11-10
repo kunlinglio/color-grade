@@ -45,35 +45,19 @@ impl ScalarBackend {
                     let value = read_slot(&slots, *from, op_index, "from")?.clone();
                     write_slot(&mut slots, *to, value, op_index)?;
                 }
-                Op::Brightness {
+                Op::Pointwise {
                     from,
                     to,
-                    brightness,
+                    operations,
                 } => {
                     if from == to {
-                        kernel::change_brightness(
+                        kernel::apply_pointwise(
                             slot_mut(&mut slots, *to, op_index, "to")?,
-                            *brightness,
+                            operations,
                         );
                     } else {
                         let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
-                        kernel::change_brightness(&mut value, *brightness);
-                        write_slot(&mut slots, *to, value, op_index)?;
-                    }
-                }
-                Op::Saturation {
-                    from,
-                    to,
-                    saturation,
-                } => {
-                    if from == to {
-                        kernel::change_saturation(
-                            slot_mut(&mut slots, *to, op_index, "to")?,
-                            *saturation,
-                        );
-                    } else {
-                        let mut value = read_slot(&slots, *from, op_index, "from")?.clone();
-                        kernel::change_saturation(&mut value, *saturation);
+                        kernel::apply_pointwise(&mut value, operations);
                         write_slot(&mut slots, *to, value, op_index)?;
                     }
                 }
@@ -216,7 +200,7 @@ impl ScalarFrame {
 
 mod kernel {
     use super::ScalarFrame;
-    use crate::render::{BlendMode, RenderedFrame};
+    use crate::render::{BlendMode, PointwiseOp, RenderedFrame};
 
     const MAX: f32 = 255.0;
 
@@ -225,21 +209,24 @@ mod kernel {
         0.2126 * r + 0.7152 * g + 0.0722 * b
     }
 
-    pub(super) fn change_brightness(buffer: &mut ScalarFrame, b: f32) {
-        let factor = b.max(0.0);
+    pub(super) fn apply_pointwise(buffer: &mut ScalarFrame, operations: &[PointwiseOp]) {
         for px in buffer.rgba.chunks_exact_mut(4) {
-            px[0] *= factor;
-            px[1] *= factor;
-            px[2] *= factor;
-        }
-    }
-
-    pub(super) fn change_saturation(buffer: &mut ScalarFrame, s: f32) {
-        for px in buffer.rgba.chunks_exact_mut(4) {
-            let y = luma(px[0], px[1], px[2]);
-            px[0] = y + s * (px[0] - y);
-            px[1] = y + s * (px[1] - y);
-            px[2] = y + s * (px[2] - y);
+            for operation in operations {
+                match operation {
+                    PointwiseOp::Brightness(brightness) => {
+                        let factor = brightness.max(0.0);
+                        px[0] *= factor;
+                        px[1] *= factor;
+                        px[2] *= factor;
+                    }
+                    PointwiseOp::Saturation(saturation) => {
+                        let y = luma(px[0], px[1], px[2]);
+                        px[0] = y + saturation * (px[0] - y);
+                        px[1] = y + saturation * (px[1] - y);
+                        px[2] = y + saturation * (px[2] - y);
+                    }
+                }
+            }
         }
     }
 
@@ -437,5 +424,47 @@ mod kernel {
         }
 
         RenderedFrame::from_frame(buffer.to_frame())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::PointwiseOp;
+
+    #[test]
+    fn combined_pointwise_matches_separate_ops() {
+        let frame = Frame::new(2, 1, vec![10, 20, 30, 255, 200, 100, 50, 255]);
+        let separate = RenderList {
+            slot_count: 1,
+            input: Slot::new(0),
+            output: Slot::new(0),
+            ops: vec![
+                Op::Pointwise {
+                    from: Slot::new(0),
+                    to: Slot::new(0),
+                    operations: vec![PointwiseOp::Brightness(1.25)],
+                },
+                Op::Pointwise {
+                    from: Slot::new(0),
+                    to: Slot::new(0),
+                    operations: vec![PointwiseOp::Saturation(0.75)],
+                },
+            ],
+        };
+        let combined = RenderList {
+            slot_count: 1,
+            input: Slot::new(0),
+            output: Slot::new(0),
+            ops: vec![Op::Pointwise {
+                from: Slot::new(0),
+                to: Slot::new(0),
+                operations: vec![PointwiseOp::Brightness(1.25), PointwiseOp::Saturation(0.75)],
+            }],
+        };
+
+        let separate = ScalarBackend::execute(separate, &frame).unwrap();
+        let combined = ScalarBackend::execute(combined, &frame).unwrap();
+        assert_eq!(separate.rgba, combined.rgba);
     }
 }

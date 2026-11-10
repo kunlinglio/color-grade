@@ -33,21 +33,22 @@ pub enum BlendMode {
     // TODO: Add more blend mode
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PointwiseOp {
+    Brightness(f32),
+    Saturation(f32),
+}
+
 #[derive(Debug)]
 pub enum Op {
     Copy {
         from: Slot,
         to: Slot,
     },
-    Brightness {
+    Pointwise {
         from: Slot,
         to: Slot,
-        brightness: f32,
-    },
-    Saturation {
-        from: Slot,
-        to: Slot,
-        saturation: f32,
+        operations: Vec<PointwiseOp>,
     },
     Merge {
         fg: Slot,
@@ -76,9 +77,17 @@ impl RenderList {
                 self.check_slot(to, "to")?;
                 anyhow::ensure!(from != to, "Copy op's 'from' and 'to' are same slot")
             }
-            Op::Brightness { from, to, .. } | Op::Saturation { from, to, .. } => {
+            Op::Pointwise {
+                from,
+                to,
+                operations,
+            } => {
                 self.check_slot(from, "from")?;
                 self.check_slot(to, "to")?;
+                anyhow::ensure!(
+                    !operations.is_empty(),
+                    "Pointwise must contain at least one operation"
+                );
             }
             Op::Merge { fg, bg, to, .. } => {
                 self.check_slot(fg, "fg")?;

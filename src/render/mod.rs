@@ -1,7 +1,7 @@
 mod scheduler;
 pub use scheduler::FrameStream;
 mod render_list;
-pub use render_list::{BlendMode, Op, RenderList, Slot};
+pub use render_list::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 mod renderer;
 pub use renderer::{BackendFrame, Renderer, ScopeGraph};
 mod scalar;
