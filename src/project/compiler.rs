@@ -535,10 +535,11 @@ impl<'ir> Materializer<'ir> {
         Ok(result)
     }
 
+    /// Bind a slot to a value and increase the slot's ref count for all users
     fn bind_value(&mut self, value: ValueId, slot: Slot) -> anyhow::Result<()> {
         let uses = self.use_counts[value.0];
-        anyhow::ensure!(uses > 0, "materialized value {} has no uses", value.0);
-        anyhow::ensure!(self.value_slots[value.0].is_none(), "value bound twice");
+        assert!(uses > 0, "materialized value {} has no uses", value.0);
+        assert!(self.value_slots[value.0].is_none(), "value bound twice");
         for _ in 1..uses {
             self.allocator.dup(slot);
         }
