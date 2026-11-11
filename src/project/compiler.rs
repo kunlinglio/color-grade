@@ -6,11 +6,13 @@ use anyhow::Context;
 use super::session::{NodeAttr, WorkFlow};
 use crate::render::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 
-pub(super) struct Compiler;
+pub(super) struct Compiler {
+    optimize: bool,
+}
 
 impl Compiler {
-    pub(super) fn new() -> Self {
-        Self
+    pub(super) fn new(optimize: bool) -> Self {
+        Self { optimize }
     }
 
     pub(super) fn compile(&self, workflow: &WorkFlow) -> anyhow::Result<RenderList> {
@@ -20,11 +22,15 @@ impl Compiler {
         //       For example, validate if all node has right inputs.
 
         // Stage 2: Lower workflow to IR
-        let ir = Lowerer::new(&workflow_graph).lower()?;
-        ir.verify()?;
+        let ir = Lowerer::new(&workflow_graph).lower()?.verify()?;
 
         // Stage 3: Optimize pass
-        let ir = PointwiseFusing::new(ir).optimize()?;
+        let ir = if self.optimize {
+            PointwiseFusing::new(ir).optimize()?.verify()?
+            // TODO: Add DCE optimize pass
+        } else {
+            ir
+        };
 
         // Stage 4: Schedule instructions
         let sequence = ir.schedule()?;
@@ -100,9 +106,10 @@ impl PointwiseFusing {
                 output: current.output,
             });
             // Rebuild def-use because ir has changed
+            // TODO: Optimize this rebuild
             def_use = IRDefUse::build(&self.ir)?;
         }
-        self.ir.verify()?;
+        self.ir = self.ir.verify()?;
         Ok(self.ir)
     }
 }
@@ -302,7 +309,7 @@ impl IR {
         output
     }
 
-    fn verify(&self) -> anyhow::Result<()> {
+    fn verify(self) -> anyhow::Result<IR> {
         // Verify input and output
         anyhow::ensure!(self.input.0 < self.max_value_id, "IR input is out of range");
         anyhow::ensure!(
@@ -319,7 +326,7 @@ impl IR {
             self.output.0
         );
         // Verify values
-        IRDefUse::build(self).with_context(|| format!("Failed to verify IR: {}", self))?;
+        IRDefUse::build(&self).with_context(|| format!("Failed to verify IR: {}", self))?;
         // Verify operand count
         for (index, instruction) in self.instructions.iter().enumerate() {
             let Some(instruction) = instruction else {
@@ -343,7 +350,7 @@ impl IR {
         }
         // Verify circle and reachability
         self.schedule()?;
-        Ok(())
+        Ok(self)
     }
 
     /// Use kahn LIFO to schedule instructions
@@ -818,7 +825,7 @@ mod tests {
 
     #[test]
     fn identity_workflow_materializes_no_ops() {
-        let list = Compiler::new().compile(&WorkFlow::default()).unwrap();
+        let list = Compiler::new(true).compile(&WorkFlow::default()).unwrap();
         assert!(list.ops.is_empty());
         assert_eq!(list.slot_count, 1);
         assert_eq!(list.input, list.output);
@@ -834,7 +841,7 @@ mod tests {
             output_from: 1,
         };
 
-        let list = Compiler::new().compile(&workflow).unwrap();
+        let list = Compiler::new(true).compile(&workflow).unwrap();
         assert_eq!(list.slot_count, 1);
         assert_eq!(list.ops.len(), 1);
         assert!(matches!(
@@ -850,12 +857,12 @@ mod tests {
     #[test]
     fn graph_ir_compiles_pointwise_and_branching_workflows() {
         let workflow = pointwise_chain(20);
-        let list = Compiler::new().compile(&workflow).unwrap();
+        let list = Compiler::new(true).compile(&workflow).unwrap();
         assert_eq!(list.ops.len(), 1);
         assert_eq!(list.slot_count, 1);
 
         let workflow = two_branch_workflow();
-        let list = Compiler::new().compile(&workflow).unwrap();
+        let list = Compiler::new(true).compile(&workflow).unwrap();
         assert_eq!(list.ops.len(), 3);
         assert_eq!(list.slot_count, 3);
     }
@@ -885,7 +892,7 @@ mod tests {
             output_from: 3,
         };
 
-        let list = Compiler::new().compile(&workflow).unwrap();
+        let list = Compiler::new(true).compile(&workflow).unwrap();
         assert_eq!(
             list.ops
                 .iter()

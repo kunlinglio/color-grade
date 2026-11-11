@@ -154,7 +154,8 @@ impl Default for WorkFlow {
 
 impl WorkFlow {
     fn compile(&self) -> anyhow::Result<RenderList> {
-        Compiler::new().compile(self)
+        // TODO: Determine whether enable optimize by outer context
+        Compiler::new(true).compile(self)
     }
 
     /// Return whether need to rerender
