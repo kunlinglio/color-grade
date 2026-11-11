@@ -17,13 +17,14 @@ impl Compiler {
         // Stage 1: Build graph and validate workflow
         let workflow_graph = WorkFlowGraph::build(workflow)?;
         // TODO: Add more validation for workflow graph
+        //       For example, validate if all node has right inputs.
 
         // Stage 2: Lower workflow to IR
         let ir = Lowerer::new(&workflow_graph).lower()?;
         ir.verify()?;
 
         // Stage 3: Optimize pass
-        // TODO
+        let ir = PointwiseFusing::new(ir).optimize()?;
 
         // Stage 4: Schedule instructions
         let sequence = ir.schedule()?;
@@ -31,6 +32,78 @@ impl Compiler {
         // Stage 5: Materialize IR with scheduled sequence.
         //      Do slot allocation ("Reg allocation") here.
         Materializer::new(&ir, sequence).materialize()
+    }
+}
+
+struct PointwiseFusing {
+    ir: IR,
+}
+
+impl PointwiseFusing {
+    pub fn new(ir: IR) -> Self {
+        Self { ir }
+    }
+    pub fn optimize(mut self) -> anyhow::Result<IR> {
+        let mut def_use = IRDefUse::build(&self.ir)?;
+        for instruction_id in self.ir.schedule()? {
+            let pre_instruction_id = {
+                let Some(instruction) = self.ir.instructions[instruction_id.0].as_ref() else {
+                    continue;
+                };
+                let IROperation::Pointwise(_) = &instruction.operation else {
+                    // cannot fuse non-pointwise instructions
+                    continue;
+                };
+                anyhow::ensure!(
+                    instruction.inputs.len() == 1,
+                    "pointwise instruction is not unary"
+                );
+                let input = instruction.inputs[0];
+                let Some(pre_instruction_id) = def_use.values[input.0].producer else {
+                    // instruction's input comes from "input"
+                    continue;
+                };
+                let Some(pre_instruction) = self.ir.instructions[pre_instruction_id.0].as_ref()
+                else {
+                    continue;
+                };
+                let IROperation::Pointwise(_) = &pre_instruction.operation else {
+                    // previous instruction is not pointwise
+                    continue;
+                };
+                if def_use.values[input.0].consumer.len() != 1 {
+                    // has other users, cannot fuse
+                    continue;
+                }
+                pre_instruction_id
+            };
+
+            // Move both instructions out; the producer's slot becomes `None`.
+            let current = self.ir.instructions[instruction_id.0]
+                .take()
+                .expect("scheduled instruction must be active");
+            let previous = self.ir.instructions[pre_instruction_id.0]
+                .take()
+                .expect("producer must be active");
+
+            let (operations, inputs) = match (previous.operation, current.operation) {
+                (IROperation::Pointwise(mut previous_ops), IROperation::Pointwise(current_ops)) => {
+                    previous_ops.extend(current_ops);
+                    (previous_ops, previous.inputs)
+                }
+                _ => unreachable!("both instructions were checked to be pointwise"),
+            };
+
+            self.ir.instructions[instruction_id.0] = Some(IRInstruction {
+                operation: IROperation::Pointwise(operations),
+                inputs,
+                output: current.output,
+            });
+            // Rebuild def-use because ir has changed
+            def_use = IRDefUse::build(&self.ir)?;
+        }
+        self.ir.verify()?;
+        Ok(self.ir)
     }
 }
 
@@ -128,38 +201,204 @@ struct ValueId(usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct InstructionId(usize);
 
-#[derive(Debug)]
-struct Value {
-    producer: Option<InstructionId>,
-    consumers: Vec<InstructionId>,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct IRInstruction {
     operation: IROperation,
     inputs: Vec<ValueId>,
     output: ValueId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum IROperation {
     Pointwise(Vec<PointwiseOp>),
     Merge(BlendMode),
 }
 
+#[derive(Clone)]
+struct IRDefUseEntry {
+    producer: Option<InstructionId>,
+    consumer: Vec<InstructionId>,
+}
+
+/// Def use analysis for IR
+struct IRDefUse {
+    values: Vec<IRDefUseEntry>,
+}
+
+impl IRDefUse {
+    fn build(ir: &IR) -> anyhow::Result<Self> {
+        let mut values = vec![
+            IRDefUseEntry {
+                producer: None,
+                consumer: Vec::new()
+            };
+            ir.max_value_id
+        ];
+        for (index, instruction) in ir.instructions.iter().enumerate() {
+            let Some(instruction) = instruction else {
+                continue;
+            };
+            let id = InstructionId(index);
+            let output = instruction.output.0;
+            anyhow::ensure!(
+                output < ir.max_value_id,
+                "Defined value %{} out of bound {}",
+                output,
+                ir.max_value_id
+            );
+            anyhow::ensure!(
+                values[output].producer.is_none() && output != ir.input.0,
+                "Assign to value %{} multiple times",
+                output
+            );
+            values[output].producer = Some(id);
+            for &input in &instruction.inputs {
+                anyhow::ensure!(
+                    input.0 < ir.max_value_id,
+                    "Use value %{} out of bound {}",
+                    input.0,
+                    ir.max_value_id
+                );
+                if values[input.0].consumer.contains(&id) {
+                    continue;
+                };
+                values[input.0].consumer.push(id);
+            }
+        }
+        Ok(Self { values })
+    }
+}
+
 #[derive(Debug)]
 struct IR {
-    values: Vec<Value>,
-    instructions: Vec<IRInstruction>,
+    /// `None` marks an instruction removed by an optimization pass. The slot is
+    /// kept so that instruction ids (which are indices) stay stable.
+    instructions: Vec<Option<IRInstruction>>,
     input: ValueId,
     output: ValueId,
+    /// Point to next available value id
+    max_value_id: usize,
+}
+
+impl IR {
+    fn new() -> Self {
+        let input = ValueId(0);
+        Self {
+            instructions: Vec::new(),
+            input,
+            output: input,
+            max_value_id: 1usize, // %0 is occupied by input and output
+        }
+    }
+
+    fn push(&mut self, operation: IROperation, inputs: Vec<ValueId>) -> ValueId {
+        let output = ValueId(self.max_value_id);
+        self.max_value_id += 1;
+        self.instructions.push(Some(IRInstruction {
+            operation,
+            inputs,
+            output,
+        }));
+        output
+    }
+
+    fn verify(&self) -> anyhow::Result<()> {
+        // Verify input and output
+        anyhow::ensure!(self.input.0 < self.max_value_id, "IR input is out of range");
+        anyhow::ensure!(
+            self.output.0 < self.max_value_id,
+            "IR output is out of range"
+        );
+        anyhow::ensure!(
+            self.instructions
+                .iter()
+                .flatten()
+                .any(|i| i.output == self.output)
+                || self.output == self.input,
+            "IR output %{} is not produced by any instruction or input",
+            self.output.0
+        );
+        // Verify values
+        IRDefUse::build(self).with_context(|| format!("Failed to verify IR: {}", self))?;
+        // Verify operand count
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            let Some(instruction) = instruction else {
+                continue;
+            };
+            match &instruction.operation {
+                IROperation::Pointwise(ops) => {
+                    anyhow::ensure!(
+                        instruction.inputs.len() == 1,
+                        "pointwise #{index} is not unary"
+                    );
+                    anyhow::ensure!(!ops.is_empty(), "pointwise #{index} has no operations");
+                }
+                IROperation::Merge(_) => {
+                    anyhow::ensure!(
+                        instruction.inputs.len() == 2,
+                        "merge #{index} is not binary"
+                    );
+                }
+            }
+        }
+        // Verify circle and reachability
+        self.schedule()?;
+        Ok(())
+    }
+
+    /// Use kahn LIFO to schedule instructions
+    fn schedule(&self) -> anyhow::Result<Vec<InstructionId>> {
+        let def_use = IRDefUse::build(self)?;
+
+        let mut indegree = vec![0usize; self.instructions.len()];
+        let mut active_count = 0;
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            let Some(instruction) = instruction else {
+                continue;
+            };
+            active_count += 1;
+            let mut producers = HashSet::new();
+            for input in &instruction.inputs {
+                if let Some(producer) = def_use.values[input.0].producer {
+                    producers.insert(producer);
+                }
+            }
+            indegree[index] = producers.len();
+        }
+
+        let mut ready: Vec<InstructionId> = self
+            .instructions
+            .iter()
+            .enumerate()
+            .filter(|(index, instruction)| instruction.is_some() && indegree[*index] == 0)
+            .map(|(index, _)| InstructionId(index))
+            .collect();
+        let mut res = Vec::with_capacity(active_count);
+
+        while let Some(instruction_id) = ready.pop() {
+            res.push(instruction_id);
+            let instruction = self.instructions[instruction_id.0]
+                .as_ref()
+                .expect("scheduled instruction must be active");
+            let output = instruction.output;
+            for &consumer in &def_use.values[output.0].consumer {
+                indegree[consumer.0] -= 1;
+                if indegree[consumer.0] == 0 {
+                    ready.push(consumer);
+                }
+            }
+        }
+
+        anyhow::ensure!(res.len() == active_count, "instruction IR contains a cycle");
+        Ok(res)
+    }
 }
 
 impl fmt::Display for IR {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "ir(%{}) {{", self.input.0)?;
 
-        for instruction in &self.instructions {
+        for instruction in self.instructions.iter().flatten() {
             write!(f, "  %{} = ", instruction.output.0)?;
             match &instruction.operation {
                 IROperation::Pointwise(operations) => {
@@ -197,111 +436,6 @@ impl fmt::Display for IR {
 
         writeln!(f, "  ret %{}", self.output.0)?;
         write!(f, "}}")
-    }
-}
-
-impl IR {
-    fn new() -> Self {
-        let input = ValueId(0);
-        Self {
-            values: vec![Value {
-                producer: None,
-                consumers: Vec::new(),
-            }],
-            instructions: Vec::new(),
-            input,
-            output: input,
-        }
-    }
-
-    fn append(&mut self, operation: IROperation, inputs: Vec<ValueId>) -> ValueId {
-        let instruction_id = InstructionId(self.instructions.len());
-        let output = ValueId(self.values.len());
-        self.values.push(Value {
-            producer: Some(instruction_id),
-            consumers: Vec::new(),
-        });
-        for &input in &inputs {
-            self.values[input.0].consumers.push(instruction_id);
-        }
-        self.instructions.push(IRInstruction {
-            operation,
-            inputs,
-            output,
-        });
-        output
-    }
-
-    fn verify(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.input.0 < self.values.len(), "IR input is out of range");
-        anyhow::ensure!(
-            self.output.0 < self.values.len(),
-            "IR output is out of range"
-        );
-
-        for (index, instruction) in self.instructions.iter().enumerate() {
-            let id = InstructionId(index);
-            anyhow::ensure!(
-                self.values[instruction.output.0].producer == Some(id),
-                "instruction {index} does not define its declared output"
-            );
-            for input in &instruction.inputs {
-                anyhow::ensure!(
-                    input.0 < self.values.len(),
-                    "IR input value is out of range"
-                );
-                anyhow::ensure!(
-                    self.values[input.0].consumers.contains(&id),
-                    "instruction {index} is missing from value {} consumers",
-                    input.0
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Use kahn LIFO to schedule instructions
-    fn schedule(&self) -> anyhow::Result<Vec<InstructionId>> {
-        let mut indegree = vec![0usize; self.instructions.len()];
-        for (index, instruction) in self.instructions.iter().enumerate() {
-            let mut producers = HashSet::new();
-            for input in &instruction.inputs {
-                if let Some(producer) = self.values[input.0].producer {
-                    producers.insert(producer);
-                }
-            }
-            indegree[index] = producers.len();
-        }
-
-        let mut ready: Vec<InstructionId> = self
-            .instructions
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| indegree[*index] == 0)
-            .map(|(index, _)| InstructionId(index))
-            .collect();
-        let mut res = Vec::with_capacity(self.instructions.len());
-
-        while let Some(instruction_id) = ready.pop() {
-            res.push(instruction_id);
-            let output = self.instructions[instruction_id.0].output;
-            let mut consumers = HashSet::new();
-            for &consumer in &self.values[output.0].consumers {
-                consumers.insert(consumer);
-            }
-            for consumer in consumers {
-                indegree[consumer.0] -= 1;
-                if indegree[consumer.0] == 0 {
-                    ready.push(consumer);
-                }
-            }
-        }
-
-        anyhow::ensure!(
-            res.len() == self.instructions.len(),
-            "instruction IR contains a cycle"
-        );
-        Ok(res)
     }
 }
 
@@ -359,13 +493,13 @@ impl<'graph> Lowerer<'graph> {
                 );
                 let mut current = operands[0];
                 if *brightness != 1.0 {
-                    current = self.ir.append(
+                    current = self.ir.push(
                         IROperation::Pointwise(vec![PointwiseOp::Brightness(*brightness)]),
                         vec![current],
                     );
                 }
                 if *saturation != 1.0 {
-                    current = self.ir.append(
+                    current = self.ir.push(
                         IROperation::Pointwise(vec![PointwiseOp::Saturation(*saturation)]),
                         vec![current],
                     );
@@ -379,7 +513,7 @@ impl<'graph> Lowerer<'graph> {
                     operands.len()
                 );
                 // FIXME: This is a workaround, we need to support more accurate port.
-                self.ir.append(IROperation::Merge(*blend_mode), operands)
+                self.ir.push(IROperation::Merge(*blend_mode), operands)
             }
         };
 
@@ -453,9 +587,12 @@ struct Materializer<'ir> {
 
 impl<'ir> Materializer<'ir> {
     fn new(ir: &'ir IR, sequence: Vec<InstructionId>) -> Self {
-        let mut use_counts = vec![0usize; ir.values.len()];
+        let mut use_counts = vec![0usize; ir.max_value_id];
         for &instruction_id in &sequence {
-            for input in &ir.instructions[instruction_id.0].inputs {
+            let instruction = ir.instructions[instruction_id.0]
+                .as_ref()
+                .expect("scheduled instruction must be active");
+            for input in &instruction.inputs {
                 use_counts[input.0] += 1;
             }
         }
@@ -466,7 +603,7 @@ impl<'ir> Materializer<'ir> {
             ir,
             sequence,
             allocator: SlotAllocator::new(),
-            value_slots: vec![None; ir.values.len()],
+            value_slots: vec![None; ir.max_value_id],
             use_counts,
             ops: Vec::new(),
         }
@@ -477,7 +614,9 @@ impl<'ir> Materializer<'ir> {
         self.bind_value(self.ir.input, input_slot)?;
 
         for instruction_id in self.sequence.clone() {
-            let instruction = &self.ir.instructions[instruction_id.0];
+            let instruction = self.ir.instructions[instruction_id.0]
+                .as_ref()
+                .expect("scheduled instruction must be active");
             let input_slots = instruction
                 .inputs
                 .iter()
@@ -686,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn pointwise_ops_remain_separate_without_optimization() {
+    fn pointwise_chain_is_fused_into_one_op() {
         let workflow = WorkFlow {
             version: 0,
             nodes: vec![normal(0, 1.25, 1.0), normal(1, 1.0, 0.75)],
@@ -697,16 +836,14 @@ mod tests {
 
         let list = Compiler::new().compile(&workflow).unwrap();
         assert_eq!(list.slot_count, 1);
-        assert_eq!(list.ops.len(), 2);
+        assert_eq!(list.ops.len(), 1);
         assert!(matches!(
             &list.ops[0],
             Op::Pointwise { operations, .. }
-                if operations == &vec![PointwiseOp::Brightness(1.25)]
-        ));
-        assert!(matches!(
-            &list.ops[1],
-            Op::Pointwise { operations, .. }
-                if operations == &vec![PointwiseOp::Saturation(0.75)]
+                if operations == &vec![
+                    PointwiseOp::Brightness(1.25),
+                    PointwiseOp::Saturation(0.75),
+                ]
         ));
     }
 
@@ -714,12 +851,12 @@ mod tests {
     fn graph_ir_compiles_pointwise_and_branching_workflows() {
         let workflow = pointwise_chain(20);
         let list = Compiler::new().compile(&workflow).unwrap();
-        assert_eq!(list.ops.len(), 40);
+        assert_eq!(list.ops.len(), 1);
         assert_eq!(list.slot_count, 1);
 
         let workflow = two_branch_workflow();
         let list = Compiler::new().compile(&workflow).unwrap();
-        assert_eq!(list.ops.len(), 37);
+        assert_eq!(list.ops.len(), 3);
         assert_eq!(list.slot_count, 3);
     }
 
