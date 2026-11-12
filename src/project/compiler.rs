@@ -77,8 +77,13 @@ impl PointwiseFusing {
                     // previous instruction is not pointwise
                     continue;
                 };
+                if input == self.ir.output {
+                    // The producer defines the observable return value and cannot be removed.
+                    // This indicates that current instruction is just a dead code.
+                    continue;
+                }
                 if def_use.values[input.0].consumer.len() != 1 {
-                    // has other users, cannot fuse
+                    // Other consumers still need the producer's output.
                     continue;
                 }
                 pre_instruction_id
@@ -241,6 +246,8 @@ impl IRDefUse {
             };
             ir.max_value_id
         ];
+        // First collect every definition. Uses are validated in a second pass so
+        // the IR does not have to store producers before their consumers.
         for (index, instruction) in ir.instructions.iter().enumerate() {
             let Some(instruction) = instruction else {
                 continue;
@@ -259,12 +266,24 @@ impl IRDefUse {
                 output
             );
             values[output].producer = Some(id);
+        }
+
+        for (index, instruction) in ir.instructions.iter().enumerate() {
+            let Some(instruction) = instruction else {
+                continue;
+            };
+            let id = InstructionId(index);
             for &input in &instruction.inputs {
                 anyhow::ensure!(
                     input.0 < ir.max_value_id,
                     "Use value %{} out of bound {}",
                     input.0,
                     ir.max_value_id
+                );
+                anyhow::ensure!(
+                    input == ir.input || values[input.0].producer.is_some(),
+                    "Use undefined value %{}",
+                    input.0
                 );
                 if values[input.0].consumer.contains(&id) {
                     continue;
@@ -821,6 +840,40 @@ mod tests {
                 "}",
             )
         );
+    }
+
+    #[test]
+    fn fusion_preserves_the_instruction_defining_output() {
+        let mut ir = IR::new();
+        let visible = ir.push(
+            IROperation::Pointwise(vec![PointwiseOp::Brightness(1.1)]),
+            vec![ir.input],
+        );
+        ir.push(
+            IROperation::Pointwise(vec![PointwiseOp::Saturation(0.9)]),
+            vec![visible],
+        );
+        ir.output = visible;
+
+        let ir = PointwiseFusing::new(ir.verify().unwrap())
+            .optimize()
+            .unwrap();
+        assert!(ir.instructions[0].is_some());
+        assert_eq!(ir.output, visible);
+    }
+
+    #[test]
+    fn verify_rejects_undefined_value_use() {
+        let mut ir = IR::new();
+        ir.max_value_id = 2;
+        let output = ir.push(
+            IROperation::Pointwise(vec![PointwiseOp::Brightness(1.0)]),
+            vec![ValueId(1)],
+        );
+        ir.output = output;
+
+        let error = ir.verify().unwrap_err();
+        assert!(format!("{error:#}").contains("Use undefined value %1"));
     }
 
     #[test]
