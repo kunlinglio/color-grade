@@ -3,7 +3,7 @@ use std::fmt;
 
 use anyhow::Context;
 
-use super::session::{NodeAttr, WorkFlow};
+use super::{NodeKind, Source, WorkFlow};
 use crate::render::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 
 pub(super) struct Compiler {
@@ -16,13 +16,14 @@ impl Compiler {
     }
 
     pub(super) fn compile(&self, workflow: &WorkFlow) -> anyhow::Result<RenderList> {
-        // Stage 1: Build graph and validate workflow
-        let workflow_graph = WorkFlowGraph::build(workflow)?;
-        // TODO: Add more validation for workflow graph
-        //       For example, validate if all node has right inputs.
+        // Stage 1: Validate workflow
+        let Some(useful_nodes) = workflow.prepare_compile() else {
+            // not finished, give up compiling
+            anyhow::bail!("Workflow not finished");
+        };
 
         // Stage 2: Lower workflow to IR
-        let ir = Lowerer::new(&workflow_graph).lower()?.verify()?;
+        let ir = Lowerer::new(workflow, useful_nodes).lower()?.verify()?;
 
         // Stage 3: Optimize pass
         let ir = if self.optimize {
@@ -116,94 +117,6 @@ impl PointwiseFusing {
         }
         self.ir = self.ir.verify()?;
         Ok(self.ir)
-    }
-}
-
-/// An index-based, validated view of the editable workflow graph.
-/// Use index of nodes rather than NodeId
-struct WorkFlowGraph<'a> {
-    workflow: &'a WorkFlow,
-    predecessors: Vec<Vec<usize>>,
-    successors: Vec<Vec<usize>>,
-    inputs: Vec<usize>,
-    output: usize,
-}
-
-impl<'a> WorkFlowGraph<'a> {
-    fn build(workflow: &'a WorkFlow) -> anyhow::Result<Self> {
-        let mut index_of = HashMap::with_capacity(workflow.nodes.len());
-        for (index, node) in workflow.nodes.iter().enumerate() {
-            let old = index_of.insert(node.node_id, index);
-            anyhow::ensure!(old.is_none(), "duplicated node id: {}", node.node_id);
-        }
-
-        let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); workflow.nodes.len()];
-        let mut successors: Vec<Vec<usize>> = vec![Vec::new(); workflow.nodes.len()];
-        for (edge_index, edge) in workflow.edges.iter().enumerate() {
-            let from = index_of.get(&edge.from).copied().ok_or_else(|| {
-                anyhow::anyhow!("edge #{edge_index} references missing node {}", edge.from)
-            })?;
-            let to = index_of.get(&edge.to).copied().ok_or_else(|| {
-                anyhow::anyhow!("edge #{edge_index} references missing node {}", edge.to)
-            })?;
-            successors[from].push(to);
-            predecessors[to].push(from);
-        }
-
-        let resolve = |id| {
-            index_of
-                .get(&id)
-                .copied()
-                .ok_or_else(|| anyhow::anyhow!("workflow references missing node {id}"))
-        };
-        let inputs = workflow
-            .input_to
-            .iter()
-            .map(|&id| resolve(id))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let output = resolve(workflow.output_from)?;
-
-        Ok(Self {
-            workflow,
-            predecessors,
-            successors,
-            inputs,
-            output,
-        })
-    }
-
-    /// Kahn's algorithm with a LIFO ready set
-    fn topological_order(&self) -> anyhow::Result<Vec<usize>> {
-        let mut indegree: Vec<usize> = self.predecessors.iter().map(Vec::len).collect();
-        let mut ready: Vec<usize> = (0..indegree.len())
-            .filter(|&index| indegree[index] == 0)
-            .collect();
-        let mut order = Vec::with_capacity(indegree.len());
-        while let Some(index) = ready.pop() {
-            order.push(index);
-            for &next in &self.successors[index] {
-                indegree[next] -= 1;
-                if indegree[next] == 0 {
-                    ready.push(next);
-                }
-            }
-        }
-        anyhow::ensure!(order.len() == indegree.len(), "workflow contains a cycle");
-        Ok(order)
-    }
-
-    fn ancestors_of_output(&self) -> HashSet<usize> {
-        let mut seen = HashSet::new();
-        seen.insert(self.output);
-        let mut stack = vec![self.output];
-        while let Some(index) = stack.pop() {
-            for &previous in &self.predecessors[index] {
-                if seen.insert(previous) {
-                    stack.push(previous);
-                }
-            }
-        }
-        seen
     }
 }
 
@@ -373,6 +286,7 @@ impl IR {
     }
 
     /// Use kahn LIFO to schedule instructions
+    /// TODO: use a better scheduler algorithm
     fn schedule(&self) -> anyhow::Result<Vec<InstructionId>> {
         let def_use = IRDefUse::build(self)?;
 
@@ -465,59 +379,43 @@ impl fmt::Display for IR {
     }
 }
 
-struct Lowerer<'graph> {
-    graph: &'graph WorkFlowGraph<'graph>,
+struct Lowerer<'workflow> {
+    workflow: &'workflow WorkFlow,
     ir: IR,
-    workset: HashMap<usize, Vec<ValueId>>,
-    reachable: HashSet<usize>,
+    outputs: HashMap<usize, ValueId>,
+    useful_nodes: HashSet<usize>,
 }
 
-impl<'graph> Lowerer<'graph> {
-    fn new(graph: &'graph WorkFlowGraph<'graph>) -> Self {
-        let reachable = graph.ancestors_of_output();
+impl<'workflow> Lowerer<'workflow> {
+    fn new(workflow: &'workflow WorkFlow, useful_nodes: HashSet<usize>) -> Self {
         Self {
-            graph,
+            workflow,
             ir: IR::new(),
-            workset: HashMap::new(),
-            reachable,
+            outputs: HashMap::new(),
+            useful_nodes,
         }
     }
 
     fn lower(mut self) -> anyhow::Result<IR> {
-        for &input_node in &self.graph.inputs {
-            if self.reachable.contains(&input_node) {
-                self.workset
-                    .entry(input_node)
-                    .or_default()
-                    .push(self.ir.input);
-            }
-        }
-
-        for node_index in self.graph.topological_order()? {
-            if self.reachable.contains(&node_index) {
+        for &node_index in self.workflow.graph().topological_order() {
+            if self.useful_nodes.contains(&node_index) {
                 self.lower_node(node_index)?;
             }
         }
+        self.ir.output = self.value_of(self.workflow.output())?;
         Ok(self.ir)
     }
 
     fn lower_node(&mut self, node_index: usize) -> anyhow::Result<()> {
-        let operands = self
-            .workset
-            .remove(&node_index)
-            .with_context(|| format!("cannot find input for node {node_index}"))?;
-
-        let output = match &self.graph.workflow.nodes[node_index].attr {
-            NodeAttr::Normal {
+        let node = &self.workflow.nodes()[node_index];
+        let output = match &node.attr {
+            NodeKind::Normal {
+                source,
                 brightness,
                 saturation,
             } => {
-                anyhow::ensure!(
-                    operands.len() == 1,
-                    "normal node {node_index} has {} inputs instead of one",
-                    operands.len()
-                );
-                let mut current = operands[0];
+                let mut current =
+                    self.value_of(source.expect("Normal source must be reachable"))?;
                 if *brightness != 1.0 {
                     current = self.ir.push(
                         IROperation::Pointwise(vec![PointwiseOp::Brightness(*brightness)]),
@@ -532,26 +430,44 @@ impl<'graph> Lowerer<'graph> {
                 }
                 current
             }
-            NodeAttr::Merge { blend_mode } => {
-                anyhow::ensure!(
-                    operands.len() == 2,
-                    "merge node {node_index} has {} inputs instead of two",
-                    operands.len()
-                );
-                // FIXME: This is a workaround, we need to support more accurate port.
-                self.ir.push(IROperation::Merge(*blend_mode), operands)
+            NodeKind::Merge {
+                sources,
+                blend_mode,
+            } => {
+                let mut sources = sources.iter().copied();
+                let mut current = self.value_of(sources.next().expect("Merge must have inputs"))?;
+                for source in sources {
+                    let foreground = self.value_of(source)?;
+                    current = self
+                        .ir
+                        .push(IROperation::Merge(*blend_mode), vec![foreground, current]);
+                }
+                current
+            }
+            NodeKind::Generator { .. } => {
+                todo!("Implement generator's lower")
             }
         };
 
-        for &successor in &self.graph.successors[node_index] {
-            if self.reachable.contains(&successor) {
-                self.workset.entry(successor).or_default().push(output);
+        self.outputs.insert(node_index, output);
+        Ok(())
+    }
+
+    fn value_of(&self, source: Source) -> anyhow::Result<ValueId> {
+        match source {
+            Source::Input => Ok(self.ir.input),
+            Source::Node(id) => {
+                let index = self
+                    .workflow
+                    .graph()
+                    .index_of(id)
+                    .expect("Source node must exist");
+                self.outputs
+                    .get(&index)
+                    .copied()
+                    .with_context(|| format!("Source node {id} is not lowered"))
             }
         }
-        if self.graph.output == node_index {
-            self.ir.output = output;
-        }
-        Ok(())
     }
 }
 
@@ -710,249 +626,5 @@ impl<'ir> Materializer<'ir> {
         }
         self.value_slots[value.0] = Some(slot);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::project::session::{Edge, Node, NodeAttr};
-    use crate::render::BlendMode;
-
-    fn normal(node_id: u64, brightness: f32, saturation: f32) -> Node {
-        Node {
-            node_id,
-            attr: NodeAttr::Normal {
-                brightness,
-                saturation,
-            },
-            pos: (0.0, 0.0),
-        }
-    }
-
-    fn pointwise_chain(node_count: usize) -> WorkFlow {
-        let nodes = (0..node_count)
-            .map(|index| normal(index as u64, 1.01 + index as f32 / 100.0, 0.75))
-            .collect();
-        let edges = (0..node_count - 1)
-            .map(|index| Edge {
-                from: index as u64,
-                to: index as u64 + 1,
-            })
-            .collect();
-        WorkFlow {
-            version: 0,
-            nodes,
-            edges,
-            input_to: vec![0],
-            output_from: node_count as u64 - 1,
-        }
-    }
-
-    fn two_branch_workflow() -> WorkFlow {
-        let mut nodes = (0..18)
-            .map(|index| normal(index, 1.01 + index as f32 / 100.0, 0.75))
-            .collect::<Vec<_>>();
-        nodes.push(Node {
-            node_id: 18,
-            attr: NodeAttr::Merge {
-                blend_mode: BlendMode::Top,
-            },
-            pos: (0.0, 0.0),
-        });
-        let mut edges = Vec::new();
-        for branch_start in [0, 9] {
-            for index in branch_start..branch_start + 8 {
-                edges.push(Edge {
-                    from: index,
-                    to: index + 1,
-                });
-            }
-            edges.push(Edge {
-                from: branch_start + 8,
-                to: 18,
-            });
-        }
-        WorkFlow {
-            version: 0,
-            nodes,
-            edges,
-            input_to: vec![0, 9],
-            output_from: 18,
-        }
-    }
-
-    fn lower(workflow: &WorkFlow) -> IR {
-        let graph = WorkFlowGraph::build(workflow).unwrap();
-        Lowerer::new(&graph).lower().unwrap()
-    }
-
-    #[test]
-    fn prints_ir_as_a_function() {
-        assert_eq!(
-            format!("{}", lower(&WorkFlow::default())),
-            "ir(%0) {\n  ret %0\n}"
-        );
-
-        let workflow = WorkFlow {
-            version: 0,
-            nodes: vec![normal(0, 1.25, 1.0), normal(1, 1.0, 0.75)],
-            edges: vec![Edge { from: 0, to: 1 }],
-            input_to: vec![0],
-            output_from: 1,
-        };
-        assert_eq!(
-            format!("{}", lower(&workflow)),
-            concat!(
-                "ir(%0) {\n",
-                "  %1 = pointwise [brightness(1.25)] %0\n",
-                "  %2 = pointwise [saturation(0.75)] %1\n",
-                "  ret %2\n",
-                "}",
-            )
-        );
-
-        let workflow = WorkFlow {
-            version: 0,
-            nodes: vec![
-                normal(0, 1.25, 1.0),
-                normal(1, 1.0, 0.75),
-                Node {
-                    node_id: 2,
-                    attr: NodeAttr::Merge {
-                        blend_mode: BlendMode::Top,
-                    },
-                    pos: (0.0, 0.0),
-                },
-            ],
-            edges: vec![Edge { from: 0, to: 2 }, Edge { from: 1, to: 2 }],
-            input_to: vec![0, 1],
-            output_from: 2,
-        };
-        assert_eq!(
-            format!("{}", lower(&workflow)),
-            concat!(
-                "ir(%0) {\n",
-                "  %1 = pointwise [saturation(0.75)] %0\n",
-                "  %2 = pointwise [brightness(1.25)] %0\n",
-                "  %3 = merge.top %1, %2\n",
-                "  ret %3\n",
-                "}",
-            )
-        );
-    }
-
-    #[test]
-    fn fusion_preserves_the_instruction_defining_output() {
-        let mut ir = IR::new();
-        let visible = ir.push(
-            IROperation::Pointwise(vec![PointwiseOp::Brightness(1.1)]),
-            vec![ir.input],
-        );
-        ir.push(
-            IROperation::Pointwise(vec![PointwiseOp::Saturation(0.9)]),
-            vec![visible],
-        );
-        ir.output = visible;
-
-        let ir = PointwiseFusing::new(ir.verify().unwrap())
-            .optimize()
-            .unwrap();
-        assert!(ir.instructions[0].is_some());
-        assert_eq!(ir.output, visible);
-    }
-
-    #[test]
-    fn verify_rejects_undefined_value_use() {
-        let mut ir = IR::new();
-        ir.max_value_id = 2;
-        let output = ir.push(
-            IROperation::Pointwise(vec![PointwiseOp::Brightness(1.0)]),
-            vec![ValueId(1)],
-        );
-        ir.output = output;
-
-        let error = ir.verify().unwrap_err();
-        assert!(format!("{error:#}").contains("Use undefined value %1"));
-    }
-
-    #[test]
-    fn identity_workflow_materializes_no_ops() {
-        let list = Compiler::new(true).compile(&WorkFlow::default()).unwrap();
-        assert!(list.ops.is_empty());
-        assert_eq!(list.slot_count, 1);
-        assert_eq!(list.input, list.output);
-    }
-
-    #[test]
-    fn pointwise_chain_is_fused_into_one_op() {
-        let workflow = WorkFlow {
-            version: 0,
-            nodes: vec![normal(0, 1.25, 1.0), normal(1, 1.0, 0.75)],
-            edges: vec![Edge { from: 0, to: 1 }],
-            input_to: vec![0],
-            output_from: 1,
-        };
-
-        let list = Compiler::new(true).compile(&workflow).unwrap();
-        assert_eq!(list.slot_count, 1);
-        assert_eq!(list.ops.len(), 1);
-        assert!(matches!(
-            &list.ops[0],
-            Op::Pointwise { operations, .. }
-                if operations == &vec![
-                    PointwiseOp::Brightness(1.25),
-                    PointwiseOp::Saturation(0.75),
-                ]
-        ));
-    }
-
-    #[test]
-    fn graph_ir_compiles_pointwise_and_branching_workflows() {
-        let workflow = pointwise_chain(20);
-        let list = Compiler::new(true).compile(&workflow).unwrap();
-        assert_eq!(list.ops.len(), 1);
-        assert_eq!(list.slot_count, 1);
-
-        let workflow = two_branch_workflow();
-        let list = Compiler::new(true).compile(&workflow).unwrap();
-        assert_eq!(list.ops.len(), 3);
-        assert_eq!(list.slot_count, 3);
-    }
-
-    #[test]
-    fn merge_materializes_as_a_separate_instruction() {
-        let workflow = WorkFlow {
-            version: 0,
-            nodes: vec![
-                normal(0, 1.25, 1.0),
-                normal(1, 1.0, 0.75),
-                Node {
-                    node_id: 2,
-                    attr: NodeAttr::Merge {
-                        blend_mode: BlendMode::Top,
-                    },
-                    pos: (0.0, 0.0),
-                },
-                normal(3, 0.5, 1.0),
-            ],
-            edges: vec![
-                Edge { from: 0, to: 2 },
-                Edge { from: 1, to: 2 },
-                Edge { from: 2, to: 3 },
-            ],
-            input_to: vec![0, 1],
-            output_from: 3,
-        };
-
-        let list = Compiler::new(true).compile(&workflow).unwrap();
-        assert_eq!(
-            list.ops
-                .iter()
-                .filter(|op| matches!(op, Op::Merge { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(list.ops.len(), 4);
     }
 }

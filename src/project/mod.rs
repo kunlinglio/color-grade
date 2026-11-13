@@ -1,5 +1,8 @@
 mod compiler;
 mod runtime;
 mod session;
+mod workflow;
 pub use runtime::{ProjectRuntime, ProjectRuntimeHandler, ProjectRuntimeThread};
-pub use session::{NodeAttr, NodeAttrDiff, NodeId, WorkFlow, WorkFlowDiff, WorkFlowDiffPayload};
+pub use workflow::{
+    NodeId, NodeKind, NodeKindDiff, Source, WorkFlow, WorkFlowDiff, WorkFlowDiffPayload,
+};

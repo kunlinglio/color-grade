@@ -10,11 +10,13 @@ use rayon::ThreadPool;
 
 use crate::media::comm::MediaSubscription;
 use crate::media::manager::MediaManager;
-use crate::project::session::{Session, WorkFlow, WorkFlowDiff};
 use crate::render::Renderer;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::thumbnail::ThumbnailManager;
 use crate::thumbnail::ThumbnailManagerClient;
+
+use super::session::Session;
+use super::{WorkFlow, WorkFlowDiff};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {

@@ -7,7 +7,7 @@ use gpui_kit::*;
 
 use crate::media::media_type::Media;
 use crate::project::{
-    NodeAttr, NodeAttrDiff, NodeId, ProjectRuntimeHandler, WorkFlowDiff, WorkFlowDiffPayload,
+    NodeId, NodeKind, NodeKindDiff, ProjectRuntimeHandler, WorkFlowDiff, WorkFlowDiffPayload,
 };
 use crate::ui::components::{Slider, Text};
 
@@ -55,7 +55,7 @@ impl Inspector {
                     version: version,
                     payload: WorkFlowDiffPayload::NodeAttr(
                         node_id,
-                        NodeAttrDiff::Brightness(*value),
+                        NodeKindDiff::Brightness(*value),
                     ),
                 };
                 this.runtime.update_state(diff);
@@ -79,7 +79,7 @@ impl Inspector {
                     version: version,
                     payload: WorkFlowDiffPayload::NodeAttr(
                         node_id,
-                        NodeAttrDiff::Saturation(*value),
+                        NodeKindDiff::Saturation(*value),
                     ),
                 };
                 this.runtime.update_state(diff);
@@ -133,7 +133,8 @@ impl Inspector {
                     );
                     return;
                 };
-                let NodeAttr::Normal {
+                let NodeKind::Normal {
+                    source: _,
                     brightness,
                     saturation,
                 } = node.attr
