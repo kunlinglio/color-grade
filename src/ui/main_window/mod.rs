@@ -55,10 +55,10 @@ impl MainWindow {
         let library = cx.new(|_cx| library::Library::new(runtime.clone(), selected_media.clone()));
         let nodes = cx.new(|cx| {
             nodes::Nodes::new(
-                cx,
-                runtime.clone(),
-                selected_media.clone(),
-                selected_nodeid.clone(),
+                // cx,
+                // runtime.clone(),
+                // selected_media.clone(),
+                // selected_nodeid.clone(),
             )
         });
         let inspector = cx.new(|cx| {

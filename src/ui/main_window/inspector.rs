@@ -126,7 +126,8 @@ impl Inspector {
                 let Some(node_id) = *this.selected_node.read(cx) else {
                     return;
                 };
-                let Some(node) = workflow.nodes.iter().find(|node| node.node_id == node_id) else {
+                let Some(node) = workflow.nodes().iter().find(|node| node.node_id == node_id)
+                else {
                     warn!(
                         "Cannot find node id {} inside workflow {:?}, the workflow may be changed",
                         node_id, workflow
@@ -158,7 +159,7 @@ impl Inspector {
                         .step(0.01)
                         .default_value(saturation),
                 );
-                this.version = Some(workflow.version);
+                this.version = Some(workflow.version());
                 cx.notify()
             });
         })
