@@ -27,11 +27,12 @@ impl Compiler {
 
         // Stage 3: Optimize pass
         let ir = if self.optimize {
-            PointwiseFusing::new(ir).optimize()?.verify()?
-            // TODO: Add DCE optimize pass
+            let ir = PointwiseFusing::new(ir).optimize()?.verify()?;
+            DeadCodeElimination::new(ir).optimize()?.verify()?
         } else {
             ir
         };
+        let ir = ir.verify_materializable()?;
 
         // Stage 4: Schedule instructions
         let sequence = ir.schedule()?;
@@ -39,6 +40,27 @@ impl Compiler {
         // Stage 5: Materialize IR with scheduled sequence.
         //      Do slot allocation ("Reg allocation") here.
         Materializer::new(&ir, sequence).materialize()
+    }
+}
+
+struct DeadCodeElimination {
+    ir: IR,
+}
+
+impl DeadCodeElimination {
+    fn new(ir: IR) -> Self {
+        Self { ir }
+    }
+
+    fn optimize(mut self) -> anyhow::Result<IR> {
+        let def_use = IRDefUse::build(&self.ir)?;
+        let live = def_use.live_instructions(&self.ir)?;
+        for (index, instruction) in self.ir.instructions.iter_mut().enumerate() {
+            if instruction.is_some() && !live.contains(&InstructionId(index)) {
+                *instruction = None;
+            }
+        }
+        Ok(self.ir)
     }
 }
 
@@ -206,6 +228,27 @@ impl IRDefUse {
         }
         Ok(Self { values })
     }
+
+    fn live_instructions(&self, ir: &IR) -> anyhow::Result<HashSet<InstructionId>> {
+        let mut live = HashSet::new();
+        let mut values = vec![ir.output];
+        while let Some(value) = values.pop() {
+            if value == ir.input {
+                continue;
+            }
+            let producer = self.values[value.0]
+                .producer
+                .with_context(|| format!("Value %{} has no producer", value.0))?;
+            if !live.insert(producer) {
+                continue;
+            }
+            let instruction = ir.instructions[producer.0]
+                .as_ref()
+                .context("Value producer is not active")?;
+            values.extend(instruction.inputs.iter().copied());
+        }
+        Ok(live)
+    }
 }
 
 #[derive(Debug)]
@@ -280,8 +323,25 @@ impl IR {
                 }
             }
         }
-        // Verify circle and reachability
+        // Verify the active instruction graph is acyclic.
         self.schedule()?;
+        Ok(self)
+    }
+
+    /// Verify if all code is useful.
+    /// Containing dead code is allowed as intermediate IR, but not allowed before materialized.
+    fn verify_materializable(self) -> anyhow::Result<IR> {
+        let def_use = IRDefUse::build(&self)?;
+        let live = def_use.live_instructions(&self)?;
+        let dead: Vec<usize> = self
+            .instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, instruction)| {
+                (instruction.is_some() && !live.contains(&InstructionId(index))).then_some(index)
+            })
+            .collect();
+        anyhow::ensure!(dead.is_empty(), "IR contains dead instructions: {dead:?}");
         Ok(self)
     }
 
