@@ -40,9 +40,27 @@ impl ParentElement for TitleBar {
     }
 }
 
+struct DragState {
+    should_move: bool,
+}
+
 impl RenderOnce for TitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = get_theme(cx);
+        let drag_state = window.use_state(cx, |_, _| DragState { should_move: false });
+
+        // The middle region holds the children; on Windows/Linux it doubles as
+        // the native caption drag area. On macOS the outer title bar drags
+        // instead (see below).
+        let bar = div()
+            .id("bar")
+            .flex()
+            .items_center()
+            .justify_between()
+            .flex_1()
+            .h_full()
+            .children(self.children);
+
         let title_bar = div()
             .id("title-bar")
             .flex()
@@ -56,30 +74,48 @@ impl RenderOnce for TitleBar {
             .flex_shrink_0()
             .border_b_1()
             .border_color(theme.colors.border.subtle)
-            .refine_style(&self.style)
-            .child(
-                div()
-                    .id("bar")
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .flex_1()
-                    .h_full()
-                    .window_control_area(WindowControlArea::Drag)
-                    .children(self.children),
-            )
-            .child(WindowControls);
+            .refine_style(&self.style);
 
         if cfg!(target_os = "macos") {
             // macOS keeps its traffic lights on the left and reserves a little
-            // right padding for the last child
+            // right padding for the last child. `window_control_area(Drag)`
+            // doesn't move the window here, so we track the mouse ourselves.
             title_bar
                 .pr(px(8.))
                 .on_double_click(move |_, window, _| window.titlebar_double_click())
-        } else if cfg!(target_os = "linux") {
-            title_bar.on_double_click(move |_, window, _| window.zoom_window())
-        } else {
+                .on_mouse_down_out(window.listener_for(&drag_state, |state, _, _, _| {
+                    state.should_move = false;
+                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    window.listener_for(&drag_state, |state, _, _, _| {
+                        state.should_move = true;
+                    }),
+                )
+                .on_mouse_up(
+                    MouseButton::Left,
+                    window.listener_for(&drag_state, |state, _, _, _| {
+                        state.should_move = false;
+                    }),
+                )
+                .on_mouse_move(window.listener_for(&drag_state, |state, _, window, _| {
+                    if state.should_move {
+                        state.should_move = false;
+                        window.start_window_move();
+                    }
+                }))
+                .child(bar)
+        } else if cfg!(target_os = "windows") {
             title_bar
+                .child(bar.window_control_area(WindowControlArea::Drag))
+                .child(WindowControls)
+        } else if cfg!(target_os = "linux") {
+            title_bar
+                .child(bar.window_control_area(WindowControlArea::Drag))
+                .child(WindowControls)
+                .on_double_click(move |_, window, _| window.zoom_window())
+        } else {
+            unreachable!("Target os is not supported")
         }
     }
 }
@@ -92,7 +128,7 @@ impl RenderOnce for TitleBar {
 struct WindowControls;
 
 impl RenderOnce for WindowControls {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") {
             return div().id("window-controls");
         }
