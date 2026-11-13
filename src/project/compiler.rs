@@ -83,7 +83,7 @@ impl PointwiseFusing {
                     // cannot fuse non-pointwise instructions
                     continue;
                 };
-                anyhow::ensure!(
+                assert!(
                     instruction.inputs.len() == 1,
                     "pointwise instruction is not unary"
                 );
@@ -462,7 +462,7 @@ impl<'workflow> Lowerer<'workflow> {
                 self.lower_node(node_index)?;
             }
         }
-        self.ir.output = self.value_of(self.workflow.output())?;
+        self.ir.output = self.value_of(self.workflow.output());
         Ok(self.ir)
     }
 
@@ -474,8 +474,7 @@ impl<'workflow> Lowerer<'workflow> {
                 brightness,
                 saturation,
             } => {
-                let mut current =
-                    self.value_of(source.expect("Normal source must be reachable"))?;
+                let mut current = self.value_of(source.expect("Normal source must be reachable"));
                 if *brightness != 1.0 {
                     current = self.ir.push(
                         IROperation::Pointwise(vec![PointwiseOp::Brightness(*brightness)]),
@@ -495,9 +494,9 @@ impl<'workflow> Lowerer<'workflow> {
                 blend_mode,
             } => {
                 let mut sources = sources.iter().copied();
-                let mut current = self.value_of(sources.next().expect("Merge must have inputs"))?;
+                let mut current = self.value_of(sources.next().expect("Merge must have inputs"));
                 for source in sources {
-                    let foreground = self.value_of(source)?;
+                    let foreground = self.value_of(source);
                     current = self
                         .ir
                         .push(IROperation::Merge(*blend_mode), vec![foreground, current]);
@@ -513,9 +512,9 @@ impl<'workflow> Lowerer<'workflow> {
         Ok(())
     }
 
-    fn value_of(&self, source: Source) -> anyhow::Result<ValueId> {
+    fn value_of(&self, source: Source) -> ValueId {
         match source {
-            Source::Input => Ok(self.ir.input),
+            Source::Input => self.ir.input,
             Source::Node(id) => {
                 let index = self
                     .workflow
@@ -525,7 +524,7 @@ impl<'workflow> Lowerer<'workflow> {
                 self.outputs
                     .get(&index)
                     .copied()
-                    .with_context(|| format!("Source node {id} is not lowered"))
+                    .expect(&format!("Source node {id} is not lowered"))
             }
         }
     }
@@ -630,7 +629,7 @@ impl<'ir> Materializer<'ir> {
 
             let output_slot = match &instruction.operation {
                 IROperation::Pointwise(operations) => {
-                    anyhow::ensure!(input_slots.len() == 1, "pointwise op is not unary");
+                    assert!(input_slots.len() == 1, "pointwise op is not unary");
                     let input = input_slots[0];
                     let output = if self.allocator.is_own(input) {
                         self.allocator.dup(input)
@@ -645,7 +644,7 @@ impl<'ir> Materializer<'ir> {
                     output
                 }
                 IROperation::Merge(mode) => {
-                    anyhow::ensure!(input_slots.len() == 2, "merge op is not binary");
+                    assert!(input_slots.len() == 2, "merge op is not binary");
                     let output = self.allocator.alloc();
                     self.ops.push(Op::Merge {
                         fg: input_slots[0],
