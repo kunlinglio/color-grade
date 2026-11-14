@@ -3,6 +3,7 @@ mod library;
 mod monitor;
 mod nodes;
 mod scopes;
+mod state;
 
 use std::path::PathBuf;
 
@@ -14,6 +15,7 @@ use crate::project::ProjectRuntimeHandler;
 use crate::ui::components::{
     Button, Icon, Text, TitleBar, h_resizable, resizable_panel, v_resizable,
 };
+use crate::ui::main_window::state::EditState;
 use crate::ui::theme::ColorTheme;
 use crate::ui::{get_theme, set_theme};
 
@@ -48,12 +50,9 @@ impl MainWindow {
             .unwrap_or("Unknown Project".to_string());
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
-        // Selected media: shared between multiple panels
-        let selected_media = cx.new(|_cx| None);
-        // Selected node's id: shared between multiple panels
-        let selected_nodeid = cx.new(|_cx| None);
-        let library = cx.new(|_cx| library::Library::new(runtime.clone(), selected_media.clone()));
-        let nodes = cx.new(|cx| {
+        let edit_state = cx.new(|_cx| EditState::new());
+        let library = cx.new(|_cx| library::Library::new(runtime.clone(), edit_state.clone()));
+        let nodes = cx.new(|_cx| {
             nodes::Nodes::new(
                 // cx,
                 // runtime.clone(),
@@ -61,14 +60,7 @@ impl MainWindow {
                 // selected_nodeid.clone(),
             )
         });
-        let inspector = cx.new(|cx| {
-            inspector::Inspector::new(
-                cx,
-                runtime.clone(),
-                selected_media.clone(),
-                selected_nodeid.clone(),
-            )
-        });
+        let inspector = cx.new(|cx| inspector::Inspector::new(cx, edit_state.clone()));
         let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
             path,

@@ -8,7 +8,6 @@ pub type NodeId = u64;
 /// The editable grade workflow, owned by the runtime's [`EditSession`].
 #[derive(Clone, Debug)]
 pub struct WorkFlow {
-    version: u64,
     // We stored the connection relation ship inside th node,
     // so we do not need edge vector.
     nodes: Vec<Node>,
@@ -124,7 +123,6 @@ impl Default for WorkFlow {
         }];
         let graph = WorkFlowGraph::build(&nodes).expect("default workflow must be a DAG");
         Self {
-            version: 0,
             nodes,
             output: Source::Node(node_id),
             allocator,
@@ -134,10 +132,6 @@ impl Default for WorkFlow {
 }
 
 impl WorkFlow {
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
@@ -160,36 +154,26 @@ impl WorkFlow {
     }
 
     /// Return whether need to rerender
-    pub fn apply_diff(&mut self, diff: WorkFlowDiff) -> bool {
-        if diff.version != self.version {
-            info!("Received outdated workflow diff, ignore it");
-            return false;
-        }
-        let applied = match diff.payload {
+    pub fn apply_diff(&mut self, diff: WorkFlowDiff) -> anyhow::Result<bool> {
+        let need_render = match diff.payload {
             WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == node_id) else {
-                    warn!("Cannot apply diff: node {node_id} does not exist");
-                    return false;
+                    anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 if !node.attr.apply_diff(attr_diff) {
-                    warn!("Cannot apply diff: diff does not match node {node_id} kind");
-                    return false;
+                    anyhow::bail!("Cannot apply diff: diff does not match node {node_id} kind");
                 }
                 true
             }
             WorkFlowDiffPayload::NodePos(node_id, new_pos) => {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == node_id) else {
-                    warn!("Cannot apply diff: node {node_id} does not exist");
-                    return false;
+                    anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 node.pos = new_pos;
-                true
+                false
             }
         };
-        if applied {
-            self.version += 1;
-        }
-        applied
+        Ok(need_render)
     }
 
     /// Check if workflow finish edit.
@@ -357,7 +341,6 @@ impl WorkFlowGraph {
 /// Only support update one node in a time
 #[derive(Clone)]
 pub struct WorkFlowDiff {
-    pub version: u64,
     pub payload: WorkFlowDiffPayload,
 }
 

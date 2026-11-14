@@ -13,6 +13,7 @@ use crate::media::media_type::Media;
 use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
 use crate::ui::components::{Icon, Loading, ResizeSensitive, SelectOption, SingleSelect, Text};
+use crate::ui::main_window::EditState;
 use crate::ui::{Theme, get_theme};
 
 /// The constant to control how many thumbnails will be loaded.
@@ -107,7 +108,7 @@ pub struct Library {
     /// The Arc<RenderImage> cannot free it's on GPU memory.
     /// So we pending drop it until we can access window.
     to_drop: Vec<Arc<RenderImage>>,
-    selected: Entity<Option<Arc<Media>>>,
+    edit_state: Entity<EditState>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
     list_scroll_handle: UniformListScrollHandle,
@@ -116,12 +117,12 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn new(runtime: ProjectRuntimeHandler, selected: Entity<Option<Arc<Media>>>) -> Self {
+    pub fn new(runtime: ProjectRuntimeHandler, edit_state: Entity<EditState>) -> Self {
         Library {
             media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
             thumbnails: HashMap::new(),
             to_drop: Vec::new(),
-            selected: selected,
+            edit_state,
             runtime,
             client: None,
             list_scroll_handle: UniformListScrollHandle::new(),
@@ -258,7 +259,7 @@ impl Render for Library {
         let theme = get_theme(cx);
         let medias_len = self.media_list.list.len();
         let runtime = self.runtime.clone();
-        let selected = self.selected.read(cx).clone();
+        let selected_media = self.edit_state.read(cx).get_selected_media();
         let this = cx.weak_entity();
         let this_for_select = this.clone();
         let this_for_resize = this.clone();
@@ -310,7 +311,7 @@ impl Render for Library {
                         theme,
                         medias_len,
                         runtime,
-                        selected,
+                        selected_media,
                         this,
                         self.list_scroll_handle.clone(),
                         self.width,
@@ -323,7 +324,7 @@ fn media_list(
     theme: Theme,
     medias_len: usize,
     runtime: ProjectRuntimeHandler,
-    selected: Option<Arc<Media>>,
+    selected_media: Option<Arc<Media>>,
     this: WeakEntity<Library>,
     scroll_handle: UniformListScrollHandle,
     width: Pixels,
@@ -367,7 +368,7 @@ fn media_list(
 
         rows.into_iter()
             .map(|(media, thumb)| {
-                let is_selected = selected.as_ref() == Some(&media);
+                let is_selected = selected_media.as_ref() == Some(&media);
                 let path = media.path.clone();
                 let runtime = runtime.clone();
                 let this = this.clone();
@@ -383,14 +384,20 @@ fn media_list(
                     .justify_center()
                     .rounded(theme.radii.large)
                     .on_click(move |_event, _window, app| {
-                        let _ = this.update(app, |library, cx| {
-                            library.selected.update(cx, |selected, cx| {
-                                *selected = Some(media.clone());
+                        let runtime = runtime.clone();
+                        let this = this.clone();
+                        let media = media.clone();
+                        let path = path.clone();
+                        app.spawn(async move |app| {
+                            let client = runtime.open_media(&path).await;
+                            let _ = this.update(app, |library, cx| {
+                                library.edit_state.update(cx, |editor, cx| {
+                                    editor.open_media(media, client, cx);
+                                });
                                 cx.notify();
                             });
-                            cx.notify();
-                        });
-                        runtime.open_media(&path);
+                        })
+                        .detach();
                     })
                     .child(render_thumb(theme, thumb));
 

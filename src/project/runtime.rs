@@ -10,13 +10,13 @@ use rayon::ThreadPool;
 
 use crate::media::comm::MediaSubscription;
 use crate::media::manager::MediaManager;
+use crate::project::session::SessionClient;
 use crate::render::Renderer;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::thumbnail::ThumbnailManager;
 use crate::thumbnail::ThumbnailManagerClient;
 
 use super::session::Session;
-use super::{WorkFlow, WorkFlowDiff};
 
 /// The super heavy struct, saving all the source needed for a opening project.
 pub struct ProjectRuntime {
@@ -75,19 +75,17 @@ impl ProjectRuntime {
                         }
                     },
                     _ = self.media_manager.handle_event().fuse() => {},
-                    _ = self.thumbnail_manager.handle_event().fuse() => {}
+                    _ = self.thumbnail_manager.handle_event().fuse() => {},
+                    _ = async {
+                        match &mut self.opened {
+                            Some(session) => session.handle_event(&mut self.renderer).await,
+                            None => std::future::pending::<()>().await,
+                        }
+                    }
+                    .fuse() => {}
                 }
             }
         });
-    }
-
-    fn re_render_current(&self) {
-        if let Some(session) = &self.opened {
-            match session.gen_render_list() {
-                Ok(render_list) => self.renderer.render(render_list, session.get_decoded()),
-                Err(err) => error!("Failed to compile render list: {err:#}"),
-            }
-        }
     }
 
     fn handle_command(&mut self, cmd: Command) {
@@ -111,31 +109,15 @@ impl ProjectRuntime {
             Command::SubscribeThumbnailClient(tx) => {
                 let _ = tx.send(self.thumbnail_manager.client());
             }
-            Command::GetState(tx) => {
-                let state = self.opened.as_ref().unwrap().get_workflow();
-                let _ = tx.send(state);
-            }
-            Command::UpdateState(diff) => {
-                if let Some(session) = &mut self.opened {
-                    if session.update(diff) {
-                        self.re_render_current();
-                    }
-                }
-            }
-            Command::OpenMedia(path) => {
-                let Ok(editable) = Session::new(path.clone()) else {
-                    error!("Failed to open media at {}", path.display());
+            Command::OpenMedia { from, tx } => {
+                let Ok((session, session_client)) = Session::new(from.clone()) else {
+                    error!("Failed to open media at {}", from.display());
                     todo!("Handle media open failed");
                 };
-                let render_list = match editable.gen_render_list() {
-                    Ok(render_list) => render_list,
-                    Err(err) => {
-                        error!("Failed to compile render list: {err:#}");
-                        return;
-                    }
-                };
-                self.renderer.render(render_list, editable.get_decoded());
-                self.opened = Some(editable);
+                // Trigger refresh FrameStreams
+                session.render(&mut self.renderer);
+                self.opened = Some(session);
+                let _ = tx.send(session_client);
             }
         }
     }
@@ -158,7 +140,7 @@ impl ProjectRuntimeThread {
 /// Communicate handler from the UI and the ProjectRuntime
 #[derive(Clone)]
 pub struct ProjectRuntimeHandler {
-    pub(super) cmd_sender: mpsc::UnboundedSender<Command>,
+    cmd_sender: mpsc::UnboundedSender<Command>,
 }
 
 impl ProjectRuntimeHandler {
@@ -176,18 +158,6 @@ impl ProjectRuntimeHandler {
             .unbounded_send(Command::SubscribeScope(tx))
             .expect("Project Runtime thread should not quit");
         rx.await.expect("Project Runtime thread should not quit")
-    }
-    pub async fn get_state(&self) -> WorkFlow {
-        let (tx, rx) = oneshot::channel();
-        self.cmd_sender
-            .unbounded_send(Command::GetState(tx))
-            .expect("Project Runtime thread should not quit");
-        rx.await.expect("Project Runtime thread should not quit")
-    }
-    pub fn update_state(&self, diff: WorkFlowDiff) {
-        self.cmd_sender
-            .unbounded_send(Command::UpdateState(diff))
-            .expect("Project Runtime thread should not quit");
     }
     pub fn request_scope(&self, from: BackendFrame, width: usize, height: usize) {
         self.cmd_sender
@@ -209,14 +179,19 @@ impl ProjectRuntimeHandler {
             .expect("Project Runtime thread should not quit");
         rx.await.expect("Project Runtime thread should not quit")
     }
-    pub fn open_media(&self, path: &Path) {
+    pub async fn open_media(&self, path: &Path) -> SessionClient {
+        let (tx, rx) = oneshot::channel();
         self.cmd_sender
-            .unbounded_send(Command::OpenMedia(path.to_path_buf()))
-            .expect("Project Runtime thread should not quit")
+            .unbounded_send(Command::OpenMedia {
+                from: path.to_path_buf(),
+                tx,
+            })
+            .expect("Project Runtime thread should not quit");
+        rx.await.expect("Project Runtime thread should not quit")
     }
 }
 
-pub enum Command {
+enum Command {
     // Subscribe commands: Bringing a Sender
     SubscribeFrameStream(oneshot::Sender<FrameStream<(BackendFrame, Arc<RenderedFrame>)>>),
     SubscribeScope(oneshot::Sender<FrameStream<ScopeGraph>>),
@@ -224,10 +199,10 @@ pub enum Command {
     SubscribeThumbnailClient(oneshot::Sender<ThumbnailManagerClient>),
     // Requests
     RequestScope(BackendFrame, usize, usize),
-    // Sync commands: for syncing project state between UI and runtime
-    GetState(oneshot::Sender<WorkFlow>),
-    UpdateState(WorkFlowDiff),
     /// Open a new media.
     /// NOTE: This will discard old media
-    OpenMedia(PathBuf),
+    OpenMedia {
+        from: PathBuf,
+        tx: oneshot::Sender<SessionClient>,
+    },
 }

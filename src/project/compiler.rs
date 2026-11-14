@@ -155,6 +155,7 @@ struct IRInstruction {
     output: ValueId,
 }
 
+/// TODO: use type system to avoid check operands len, see [`Op`]
 #[derive(Debug, Clone)]
 enum IROperation {
     Pointwise(Vec<PointwiseOp>),

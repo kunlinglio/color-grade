@@ -78,6 +78,7 @@ pub struct ThumbnailManager {
         oneshot::Sender<Option<Arc<Thumbnail>>>,
     )>,
     /// Shared sender for all client
+    /// To support multiple subscribers
     client_tx: mpsc::UnboundedSender<(
         Arc<Media>,
         ThumbnailSize,
