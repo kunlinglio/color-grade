@@ -43,12 +43,10 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                edit_state.update(cx, |this, cx| {
-                    let success = this.update(diff, cx);
-                    if !success {
-                        warn!("Failed to apply brightness changes");
-                    };
-                });
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx)) {
+                    warn!("Failed to apply brightness changes: {:#}", e);
+                    this.sync(cx);
+                };
             }
         })
         .detach();
@@ -65,57 +63,16 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                edit_state.update(cx, |this, cx| {
-                    let success = this.update(diff, cx);
-                    if !success {
-                        warn!("Failed to apply saturation changes");
-                    };
-                });
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx)) {
+                    warn!("Failed to apply saturation changes: {:#}", e);
+                    this.sync(cx);
+                };
             }
         })
         .detach();
 
-        cx.observe(&edit_state, |this, state, cx| {
-            let Some(workflow) = state.read(cx).get_workflow() else {
-                // TODO: Handle effect when select nothing
-                return;
-            };
-            let Some(node_id) = state.read(cx).get_selected_node() else {
-                return;
-            };
-            let Some(node) = workflow.get_node(node_id) else {
-                warn!(
-                    "Cannot find node id {} inside workflow {:?}, the workflow may be changed",
-                    node_id, workflow
-                );
-                return;
-            };
-            let NodeKind::Normal {
-                source: _,
-                brightness,
-                saturation,
-            } = node.attr
-            else {
-                // TODO: Handle un-inspectable nodes
-                return;
-            };
-            this.brightness.write(
-                cx,
-                SliderState::new()
-                    .min(0.0)
-                    .max(2.0)
-                    .step(0.01)
-                    .default_value(brightness),
-            );
-            this.saturation.write(
-                cx,
-                SliderState::new()
-                    .min(0.0)
-                    .max(2.0)
-                    .step(0.01)
-                    .default_value(saturation),
-            );
-            cx.notify()
+        cx.observe(&edit_state, |this, _state, cx| {
+            this.sync(cx);
         })
         .detach();
 
@@ -124,6 +81,54 @@ impl Inspector {
             saturation,
             edit_state,
         }
+    }
+
+    fn sync(&mut self, cx: &mut Context<Self>) {
+        let Some(workflow) = self.edit_state.read(cx).get_workflow() else {
+            // TODO: Handle effect when open nothing
+            return;
+        };
+        let Some(node_id) = self.edit_state.read(cx).get_selected_node() else {
+            // TODO: Handle effect when select nothing
+            return;
+        };
+        let node = workflow.get_node(node_id).unwrap_or_else(|| {
+            panic!(
+                "Cannot find node id {} inside workflow {:?}, the workflow may be corrupted",
+                node_id, workflow
+            )
+        });
+        let NodeKind::Normal {
+            source: _,
+            brightness,
+            saturation,
+        } = node.attr
+        else {
+            // TODO: Handle un-inspectable nodes
+            return;
+        };
+        Self::set_slider(&self.brightness, brightness, cx);
+        Self::set_slider(&self.saturation, saturation, cx);
+        cx.notify()
+    }
+
+    fn set_slider(slider: &Entity<SliderState>, value: f32, cx: &mut Context<Inspector>) {
+        let old_slider = slider.read(cx);
+        let current = match old_slider.value() {
+            SliderValue::Single(current) => current,
+            _ => return,
+        };
+        if (current - value).abs() <= f32::EPSILON {
+            return;
+        }
+        slider.write(
+            cx,
+            SliderState::new()
+                .min(old_slider.min_value())
+                .max(old_slider.max_value())
+                .step(old_slider.step_value())
+                .default_value(value),
+        );
     }
 }
 

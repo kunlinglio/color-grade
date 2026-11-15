@@ -91,16 +91,16 @@ impl NodeKind {
         }
     }
     /// Return if diff legal
-    fn apply_diff(&mut self, diff: NodeKindDiff) -> bool {
+    fn apply_diff(&mut self, diff: &NodeKindDiff) -> bool {
         match (self, diff) {
             (NodeKind::Normal { brightness, .. }, NodeKindDiff::Brightness(new)) => {
-                *brightness = new;
+                *brightness = *new;
             }
             (NodeKind::Normal { saturation, .. }, NodeKindDiff::Saturation(new)) => {
-                *saturation = new;
+                *saturation = *new;
             }
             (NodeKind::Merge { blend_mode, .. }, NodeKindDiff::BlendMode(new)) => {
-                *blend_mode = new;
+                *blend_mode = *new;
             }
             _ => return false,
         }
@@ -153,10 +153,10 @@ impl WorkFlow {
     }
 
     /// Return whether need to rerender or the diff is invalid
-    pub fn apply_diff(&mut self, diff: WorkFlowDiff) -> anyhow::Result<bool> {
-        let need_render = match diff.payload {
+    pub fn apply_diff(&mut self, diff: &WorkFlowDiff) -> anyhow::Result<bool> {
+        let need_render = match &diff.payload {
             WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
-                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == node_id) else {
+                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 if !node.attr.apply_diff(attr_diff) {
@@ -165,10 +165,10 @@ impl WorkFlow {
                 true
             }
             WorkFlowDiffPayload::NodePos(node_id, new_pos) => {
-                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == node_id) else {
+                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
-                node.pos = new_pos;
+                node.pos = *new_pos;
                 false
             }
         };

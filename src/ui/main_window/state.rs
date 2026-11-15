@@ -5,9 +5,13 @@ use gpui_kit::Context;
 use crate::media::media_type::Media;
 use crate::project::{NodeId, SessionClient, WorkFlow, WorkFlowDiff};
 
+/// A edit state shared by multiple panel inside mainwindow.
+/// Since they all need to edit on same data structure, so a unified
+/// enter is necessary to avoid inconsistency.
+///
 /// NOTE: We didn't have any access control, so this could cause some
 /// conflict under high frequent update requests. But I cannot come up
-/// with any good enough solutions, so that's a necussary trade off :(.
+/// with any good enough solutions, so that's a necessary trade off :(.
 pub enum EditState {
     Empty,
     Opened {
@@ -35,7 +39,7 @@ impl EditState {
             None
         }
     }
-    pub fn get_workflow(&self) -> Option<Arc<WorkFlow>> {
+    pub fn get_workflow(&self) -> Option<&WorkFlow> {
         if let EditState::Opened { client, .. } = self {
             Some(client.get_workflow())
         } else {
@@ -45,17 +49,9 @@ impl EditState {
     pub fn open_media(
         &mut self,
         new: Arc<Media>,
-        mut client: SessionClient,
+        client: SessionClient,
         cx: &mut Context<'_, Self>,
     ) {
-        let mut updates = client.subscribe_change();
-        cx.spawn(async move |this, cx| {
-            while let Ok(_) = updates.recv().await {
-                let _ = this.update(cx, |_this, cx| cx.notify());
-            }
-        })
-        .detach();
-
         *self = Self::Opened {
             client,
             media: new,
@@ -63,17 +59,16 @@ impl EditState {
         };
         cx.notify();
     }
-    /// This will block on current thread until it returns if update success.
-    /// It worthed, since we need to react to user by update state.
-    /// FIXME: Maybe this will cause latency
-    pub fn update(&mut self, diff: WorkFlowDiff, cx: &mut Context<Self>) -> bool {
-        let changed = match self {
-            EditState::Empty => false,
-            EditState::Opened { client, .. } => client.update_workflow(diff),
-        };
-        if changed {
-            cx.notify();
-        };
-        changed
+    /// Apply diff to workflow,
+    /// returns if the diff validate
+    pub fn update(&mut self, diff: WorkFlowDiff, cx: &mut Context<Self>) -> anyhow::Result<()> {
+        match self {
+            EditState::Empty => anyhow::bail!("No media opened"),
+            EditState::Opened { client, .. } => {
+                client.update_workflow(diff)?;
+                cx.notify();
+                Ok(())
+            }
+        }
     }
 }
