@@ -102,7 +102,7 @@ impl Inspector {
             source: _,
             brightness,
             saturation,
-        } = node.attr
+        } = node.kind
         else {
             // TODO: Handle un-inspectable nodes
             return;

@@ -117,22 +117,12 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn new(runtime: ProjectRuntimeHandler, edit_state: Entity<EditState>) -> Self {
-        Library {
-            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
-            thumbnails: HashMap::new(),
-            to_drop: Vec::new(),
-            edit_state,
-            runtime,
-            client: None,
-            list_scroll_handle: UniformListScrollHandle::new(),
-            thumbnail_size: ThumbnailSize::Px256,
-            width: px(200.),
-        }
-    }
-
-    pub fn init(&self, cx: &mut Context<Self>, window: &mut Window) {
-        cx.spawn_in(window, async move |this, cx| {
+    pub fn new(
+        cx: &mut Context<Self>,
+        runtime: ProjectRuntimeHandler,
+        edit_state: Entity<EditState>,
+    ) -> Self {
+        cx.spawn(async move |this, cx| {
             let runtime = this
                 .read_with(cx, |this, _cx| this.runtime.clone())
                 .unwrap();
@@ -144,6 +134,17 @@ impl Library {
             });
         })
         .detach();
+        Library {
+            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
+            thumbnails: HashMap::new(),
+            to_drop: Vec::new(),
+            edit_state,
+            runtime,
+            client: None,
+            list_scroll_handle: UniformListScrollHandle::new(),
+            thumbnail_size: ThumbnailSize::Px256,
+            width: px(200.),
+        }
     }
 
     /// Monitor media events.

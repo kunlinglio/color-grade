@@ -51,15 +51,8 @@ impl MainWindow {
 
         let monitor = cx.new(|_cx| monitor::Monitor::new());
         let edit_state = cx.new(|_cx| EditState::new());
-        let library = cx.new(|_cx| library::Library::new(runtime.clone(), edit_state.clone()));
-        let nodes = cx.new(|_cx| {
-            nodes::Nodes::new(
-                // cx,
-                // runtime.clone(),
-                // selected_media.clone(),
-                // selected_nodeid.clone(),
-            )
-        });
+        let library = cx.new(|cx| library::Library::new(cx, runtime.clone(), edit_state.clone()));
+        let nodes = cx.new(|cx| nodes::Nodes::new(cx, edit_state.clone()));
         let inspector = cx.new(|cx| inspector::Inspector::new(cx, edit_state.clone()));
         let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
         MainWindow {
@@ -78,8 +71,6 @@ impl MainWindow {
         self.monitor.update(cx, |monitor, cx| {
             monitor.init(cx, window, self.runtime.clone())
         });
-        self.library
-            .update(cx, |library, cx| library.init(cx, window));
         self.scopes.update(cx, |scopes, cx| scopes.init(cx, window));
     }
 

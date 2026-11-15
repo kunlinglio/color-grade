@@ -469,7 +469,7 @@ impl<'workflow> Lowerer<'workflow> {
 
     fn lower_node(&mut self, node_index: usize) -> anyhow::Result<()> {
         let node = &self.workflow.nodes()[node_index];
-        let output = match &node.attr {
+        let output = match &node.kind {
             NodeKind::Normal {
                 source,
                 brightness,
@@ -494,7 +494,7 @@ impl<'workflow> Lowerer<'workflow> {
                 sources,
                 blend_mode,
             } => {
-                let mut sources = sources.iter().copied();
+                let mut sources = sources.iter().flatten().copied();
                 let mut current = self.value_of(sources.next().expect("Merge must have inputs"));
                 for source in sources {
                     let foreground = self.value_of(source);

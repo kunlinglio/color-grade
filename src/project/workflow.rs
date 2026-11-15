@@ -47,7 +47,7 @@ pub enum Source {
 #[derive(Clone, Debug)]
 pub struct Node {
     pub node_id: NodeId,
-    pub attr: NodeKind,
+    pub kind: NodeKind,
     pub pos: (f32, f32),
 }
 
@@ -64,7 +64,9 @@ pub enum NodeKind {
     /// A layer merge node with n input and 1 output
     Merge {
         /// Ordered bottom-to-top.
-        sources: Vec<Source>,
+        /// `None` is an unconnected slot: it is ignored when compiling, but a Merge
+        /// needs at least two connected inputs to be considered finished.
+        sources: Vec<Option<Source>>,
         blend_mode: BlendMode,
     },
     /// A generator node with 0 input and 1 output
@@ -114,7 +116,7 @@ impl Default for WorkFlow {
         let node_id = allocator.alloc();
         let nodes = vec![Node {
             node_id,
-            attr: NodeKind::Normal {
+            kind: NodeKind::Normal {
                 source: Some(Source::Input),
                 brightness: 1.0,
                 saturation: 1.0,
@@ -159,7 +161,7 @@ impl WorkFlow {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
-                if !node.attr.apply_diff(attr_diff) {
+                if !node.kind.apply_diff(attr_diff) {
                     anyhow::bail!("Cannot apply diff: diff does not match node {node_id} kind");
                 }
                 true
@@ -242,14 +244,17 @@ impl WorkFlowGraph {
                 Ok(())
             };
 
-            match &node.attr {
+            match &node.kind {
                 NodeKind::Normal {
                     source: Some(source),
                     ..
                 } => add_source(*source)?,
                 NodeKind::Merge { sources, .. } => {
                     for source in sources {
-                        add_source(*source)?;
+                        let Some(source) = *source else {
+                            continue;
+                        };
+                        add_source(source)?;
                     }
                 }
                 NodeKind::Normal { source: None, .. } | NodeKind::Generator { .. } => {}
@@ -282,14 +287,15 @@ impl WorkFlowGraph {
                     .get(id)
                     .is_some_and(|index| reachable.contains(index)),
             };
-            let node_reachable = match &nodes[index].attr {
+            let node_reachable = match &nodes[index].kind {
                 NodeKind::Normal {
                     source: Some(source),
                     ..
                 } => source_reachable(source),
                 NodeKind::Normal { source: None, .. } => false,
                 NodeKind::Merge { sources, .. } => {
-                    sources.len() >= 2 && sources.iter().all(source_reachable)
+                    sources.iter().flatten().count() >= 2
+                        && sources.iter().flatten().all(source_reachable)
                 }
                 NodeKind::Generator { .. } => true,
             };
