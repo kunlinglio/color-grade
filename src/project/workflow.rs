@@ -148,12 +148,11 @@ impl WorkFlow {
         &self.graph
     }
 
-    pub fn compile(&self) -> anyhow::Result<RenderList> {
-        // TODO: Determine whether enable optimize by outer context
-        Compiler::new(true).compile(self)
+    pub fn compile(&self, optimize: bool) -> anyhow::Result<RenderList> {
+        Compiler::new(optimize).compile(self)
     }
 
-    /// Return whether need to rerender
+    /// Return whether need to rerender or the diff is invalid
     pub fn apply_diff(&mut self, diff: WorkFlowDiff) -> anyhow::Result<bool> {
         let need_render = match diff.payload {
             WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
@@ -202,13 +201,18 @@ pub(super) struct WorkFlowGraph {
     predecessors: Vec<Vec<usize>>,
     successors: Vec<Vec<usize>>,
     topological_order: Vec<usize>,
-    /// Stores nodes which's input is satisfied and reachable from graph's inputs
+    /// Stores nodes whose input is satisfied and reachable from graph's inputs
     reachable: HashSet<usize>,
 }
 
 impl WorkFlowGraph {
-    /// Build graph cache and verify whole workflow
-    /// TODO: Maybe we can do less work inside this build
+    /// Builds the derived DAG cache and validates the workflow.
+    ///
+    /// Must be called after every structural edit; value edits (params, position)
+    /// leave the cache untouched.
+    /// Eager rebuild is a trade-off:
+    /// it rejects invalid topologies (duplicate ids, dangling sources, cycles) at edit time
+    /// and lets the much more frequent `compile` reuse the cached order/index.
     fn build(nodes: &[Node]) -> anyhow::Result<Self> {
         // build index_of
         let mut index_of = HashMap::with_capacity(nodes.len());
@@ -252,7 +256,7 @@ impl WorkFlowGraph {
             }
         }
 
-        // build topogogical order
+        // build topological order
         let mut indegree: Vec<usize> = predecessors.iter().map(Vec::len).collect();
         let mut ready: Vec<usize> = (0..indegree.len())
             .filter(|&index| indegree[index] == 0)

@@ -62,7 +62,8 @@ impl Session {
     }
 
     pub fn render(&self, renderer: &mut Renderer) {
-        match self.workflow.compile() {
+        // TODO: Determine whether enable optimize by outer context
+        match self.workflow.compile(true) {
             Ok(render_list) => {
                 renderer.render(render_list, self.decoded.clone());
             }
