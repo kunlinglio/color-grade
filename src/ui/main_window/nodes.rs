@@ -115,13 +115,13 @@ impl Nodes {
                         match edge_cache.get_mut(&(*source, id, port)) {
                             Some(edge) => {
                                 edge.update(cx, |this, cx| {
-                                    this.sync(source, node_cards, to);
+                                    *this = Edge::new(cx, source, node_cards, to);
                                     cx.notify();
                                 });
                                 outdated.remove(&(*source, id, port));
                             }
                             None => {
-                                let edge = cx.new(|_cx| Edge::new(source, node_cards, to));
+                                let edge = cx.new(|cx| Edge::new(cx, source, node_cards, to));
                                 edge_cache.insert((*source, id, port), edge);
                             }
                         }
@@ -136,12 +136,12 @@ impl Nodes {
                     match last_edge {
                         Some(edge) => {
                             edge.update(cx, |this, cx| {
-                                this.sync(&output, node_cards, to);
+                                *this = Edge::new(cx, &output, node_cards, to);
                                 cx.notify();
                             });
                         }
                         None => {
-                            let edge = cx.new(|_cx| Edge::new(&output, node_cards, to));
+                            let edge = cx.new(|cx| Edge::new(cx, &output, node_cards, to));
                             *last_edge = Some(edge)
                         }
                     }
@@ -168,13 +168,15 @@ impl Render for Nodes {
                     .into_any_element(),
                 NodesState::Active {
                     node_cards,
-                    edge_cache: _,
-                    last_edge: _,
+                    edge_cache,
+                    last_edge,
                 } => div()
                     .id("nodes-container")
                     .relative()
                     .size_full()
                     .overflow_hidden()
+                    .children(edge_cache.values().cloned())
+                    .children(last_edge.iter().cloned())
                     .children(node_cards.values().cloned())
                     .on_mouse_down(
                         MouseButton::Left,
@@ -206,29 +208,13 @@ enum EdgeTo {
 }
 
 impl Edge {
-    fn new(source: &Source, node_cards: &HashMap<NodeId, Entity<NodeCard>>, to: EdgeTo) -> Self {
-        Self {
-            from: match source {
-                Source::Input => EdgeFrom::Input,
-                Source::Node(id) => {
-                    let node = node_cards
-                        .get(&id)
-                        .expect("Node has update before")
-                        .downgrade();
-                    EdgeFrom::Node(node)
-                }
-            },
-            to,
-        }
-    }
-    fn sync(
-        &mut self,
+    fn new(
+        cx: &mut Context<Self>,
         source: &Source,
         node_cards: &HashMap<NodeId, Entity<NodeCard>>,
         to: EdgeTo,
-    ) {
-        self.to = to;
-        self.from = match source {
+    ) -> Self {
+        let from = match source {
             Source::Input => EdgeFrom::Input,
             Source::Node(id) => {
                 let node = node_cards
@@ -238,8 +224,83 @@ impl Edge {
                 EdgeFrom::Node(node)
             }
         };
+        if let EdgeFrom::Node(card) = &from {
+            if let Some(card) = card.upgrade() {
+                cx.observe(&card, |_, _, cx| cx.notify()).detach();
+            }
+        }
+        if let EdgeTo::Node(_, card) = &to {
+            if let Some(card) = card.upgrade() {
+                cx.observe(&card, |_, _, cx| cx.notify()).detach();
+            }
+        }
+        Self { from, to }
+    }
+    fn anchors(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {
+        let from = match &self.from {
+            EdgeFrom::Input => point(px(16.0), px(96.0)), // Input port
+            EdgeFrom::Node(card) => card.upgrade()?.read(cx).output_anchor(),
+        };
+        let to = match &self.to {
+            EdgeTo::Output => point(px(720.0), px(96.0)), // Output port
+            EdgeTo::Node(port, card) => card.upgrade()?.read(cx).input_anchor(*port),
+        };
+        Some((from, to))
     }
 }
+
+impl Render for Edge {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
+        let Some((from, to)) = self.anchors(cx) else {
+            return div();
+        };
+
+        let fx = f32::from(from.x);
+        let fy = f32::from(from.y);
+        let tx = f32::from(to.x);
+        let ty = f32::from(to.y);
+
+        let left = fx.min(tx);
+        let top = fy.min(ty);
+        let width = (tx - fx).abs().max(1.0);
+        let height = (ty - fy).abs().max(1.0);
+        let color = theme.colors.text.muted;
+
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(width))
+            .h(px(height))
+            .child(
+                canvas(
+                    |_bounds, _window, _cx| (),
+                    move |bounds, _, window, _cx| {
+                        let from = point(
+                            px(fx - left) + bounds.origin.x,
+                            px(fy - top) + bounds.origin.y,
+                        );
+                        let to = point(
+                            px(tx - left) + bounds.origin.x,
+                            px(ty - top) + bounds.origin.y,
+                        );
+
+                        let mut builder = PathBuilder::stroke(px(1.5));
+                        builder.move_to(from);
+                        builder.line_to(to);
+                        if let Ok(path) = builder.build() {
+                            window.paint_path(path, color);
+                        }
+                    },
+                )
+                .size_full(),
+            )
+    }
+}
+
+const NODE_WIDTH: f32 = 160.;
+const NODE_HEIGHT: f32 = 72.;
 
 struct NodeCard {
     id: NodeId,
@@ -315,6 +376,26 @@ impl NodeCard {
             .update(cx, |state, cx| state.update(diff, cx))
             .expect("Update node position should not failed");
     }
+    fn output_anchor(&self) -> Point<Pixels> {
+        point(
+            px(self.pos.0 + NODE_WIDTH),
+            px(self.pos.1 + NODE_HEIGHT / 2.0),
+        )
+    }
+
+    fn input_anchor(&self, port: PortId) -> Point<Pixels> {
+        let count = match self.kind {
+            NodeCardKind::Normal {} => 1,
+            NodeCardKind::Merge { input_count } => input_count,
+            NodeCardKind::Generator {} => 0,
+        };
+        let y = if count <= 1 {
+            NODE_HEIGHT / 2.0
+        } else {
+            NODE_HEIGHT * (port as f32 + 1.0) / (count as f32 + 1.0)
+        };
+        point(px(self.pos.0), px(self.pos.1 + y))
+    }
 }
 
 impl Render for NodeCard {
@@ -325,8 +406,8 @@ impl Render for NodeCard {
             .absolute()
             .left(px(self.pos.0))
             .top(px(self.pos.1))
-            .w(px(160.))
-            .h(px(72.))
+            .w(px(NODE_WIDTH))
+            .h(px(NODE_HEIGHT))
             .rounded(theme.radii.medium)
             .bg(theme.colors.background.surface)
             .border_1()
