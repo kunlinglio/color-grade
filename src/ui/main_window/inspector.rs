@@ -43,7 +43,7 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx)) {
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx, false)) {
                     warn!("Failed to apply brightness changes: {:#}", e);
                     this.sync(cx);
                 };
@@ -63,7 +63,7 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx)) {
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx, false)) {
                     warn!("Failed to apply saturation changes: {:#}", e);
                     this.sync(cx);
                 };

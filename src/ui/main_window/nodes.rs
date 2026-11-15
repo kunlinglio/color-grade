@@ -387,7 +387,7 @@ impl NodeCard {
         };
         if let Err(e) = self
             .edit_state
-            .update(cx, |state, cx| state.update(diff, cx))
+            .update(cx, |state, cx| state.update(diff, cx, false))
         {
             self.pos = start_pos;
             warn!("Failed to update workflow: {:#}", e);

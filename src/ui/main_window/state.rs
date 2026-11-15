@@ -61,12 +61,19 @@ impl EditState {
     }
     /// Apply diff to workflow,
     /// returns if the diff validate
-    pub fn update(&mut self, diff: WorkFlowDiff, cx: &mut Context<Self>) -> anyhow::Result<()> {
+    pub fn update(
+        &mut self,
+        diff: WorkFlowDiff,
+        cx: &mut Context<Self>,
+        need_notify: bool,
+    ) -> anyhow::Result<()> {
         match self {
             EditState::Empty => anyhow::bail!("No media opened"),
             EditState::Opened { client, .. } => {
                 client.update_workflow(diff)?;
-                cx.notify();
+                if need_notify {
+                    cx.notify();
+                }
                 Ok(())
             }
         }
@@ -86,6 +93,9 @@ impl EditState {
                 warn!("Selected node not exists");
                 return;
             }
+        }
+        if *selected_node == id {
+            return;
         }
         *selected_node = id;
         cx.notify();
