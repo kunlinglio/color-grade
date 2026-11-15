@@ -353,3 +353,61 @@ impl RenderOnce for Loading {
             .refine_style(&self.style)
     }
 }
+
+/// Draws a ring just outside its parent, separated by `gap`.
+#[derive(IntoElement)]
+pub struct Outline {
+    color: Option<Rgba>,
+    width: Pixels,
+    offset: Pixels,
+    radius: Option<Pixels>,
+    style: StyleRefinement,
+}
+
+impl Outline {
+    pub fn new(width: Pixels, offset: Pixels) -> Self {
+        Self {
+            color: None,
+            width,
+            offset,
+            radius: None,
+            style: StyleRefinement::default(),
+        }
+    }
+
+    pub fn color(mut self, color: impl Into<Rgba>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+
+    pub fn radius(mut self, radius: impl Into<Pixels>) -> Self {
+        self.radius = Some(radius.into());
+        self
+    }
+}
+
+impl Styled for Outline {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for Outline {
+    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        let color = self.color.unwrap_or(theme.colors.focus);
+        let radius = self.radius.unwrap_or(theme.radii.medium);
+        let inset = self.width + self.offset;
+
+        div()
+            .absolute()
+            .left(-inset)
+            .top(-inset)
+            .right(-inset)
+            .bottom(-inset)
+            .rounded(radius + inset)
+            .border(self.width)
+            .border_color(color)
+            .refine_style(&self.style)
+    }
+}

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use gpui_kit::*;
 
 use crate::project::{Node, NodeId, NodeKind, Source};
-use crate::ui::components::Text;
+use crate::ui::components::{Outline, Text};
 use crate::ui::get_theme;
 use crate::ui::main_window::state::EditState;
 
@@ -91,6 +91,7 @@ impl Nodes {
 
     fn sync(&mut self, cx: &mut Context<Self>) {
         let edit_state = self.edit_state.read(cx);
+        let selected_node = edit_state.get_selected_node();
         match edit_state.get_workflow() {
             Some(workflow) => {
                 let nodes: Vec<_> = workflow.nodes().iter().map(|node| node.clone()).collect();
@@ -111,15 +112,17 @@ impl Nodes {
                 let mut outdated: HashSet<_> = node_cards.keys().copied().collect();
                 for node in &nodes {
                     let id = node.node_id;
+                    let selected = Some(id) == selected_node;
                     match node_cards.get_mut(&id) {
                         Some(card) => {
                             card.update(cx, |this, _cx| {
-                                this.sync(node);
+                                this.sync(node, selected);
                             });
                             outdated.remove(&id);
                         }
                         None => {
-                            let card = cx.new(|_cx| NodeCard::new(&node));
+                            let card = cx
+                                .new(|_cx| NodeCard::new(&node, self.edit_state.clone(), selected));
                             node_cards.insert(id, card);
                         }
                     }
@@ -139,7 +142,7 @@ impl Nodes {
 }
 
 impl Render for Nodes {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .child(Text::new("Nodes").title())
@@ -151,6 +154,14 @@ impl Render for Nodes {
                     node_cards,
                     edge_cache: _,
                 } => div()
+                    .id("nodes-container")
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.edit_state
+                                .update(cx, |state, cx| state.select_node(None, cx));
+                        }),
+                    )
                     .relative()
                     .size_full()
                     .children(node_cards.values().cloned())
@@ -160,9 +171,12 @@ impl Render for Nodes {
 }
 
 struct NodeCard {
+    id: NodeId,
     selected: bool,
     pos: (f32, f32),
     kind: NodeCardKind,
+    /// Used to notify select and pos changed
+    edit_state: Entity<EditState>,
 }
 
 enum NodeCardKind {
@@ -172,7 +186,7 @@ enum NodeCardKind {
 }
 
 impl NodeCard {
-    fn new(node: &Node) -> Self {
+    fn new(node: &Node, edit_state: Entity<EditState>, selected: bool) -> Self {
         let kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
             NodeKind::Merge { sources, .. } => NodeCardKind::Merge {
@@ -181,14 +195,16 @@ impl NodeCard {
             NodeKind::Generator { .. } => NodeCardKind::Generator {},
         };
         Self {
-            selected: false,
+            id: node.node_id,
+            selected: selected,
             pos: node.pos,
             kind,
+            edit_state,
         }
     }
-    fn sync(&mut self, node: &Node) {
+    fn sync(&mut self, node: &Node, selected: bool) {
         self.pos = node.pos;
-
+        self.selected = selected;
         self.kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
             NodeKind::Merge { sources, .. } => NodeCardKind::Merge {
@@ -202,16 +218,35 @@ impl NodeCard {
 impl Render for NodeCard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = get_theme(cx);
-        div()
+        let element = div()
+            .id(format!("node-card-{}", self.id))
             .absolute()
             .left(px(self.pos.0))
             .top(px(self.pos.1))
-            .w(px(160.0))
-            .h(px(72.0))
+            .w(px(160.))
+            .h(px(72.))
             .rounded(theme.radii.medium)
             .bg(theme.colors.background.surface)
             .border_1()
             .border_color(theme.colors.border.subtle)
-            .child(Text::new("Node").content())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.edit_state.update(cx, |state, cx| {
+                        state.select_node(Some(this.id), cx);
+                    });
+                    cx.stop_propagation();
+                }),
+            );
+        let element = if self.selected {
+            element.child(
+                Outline::new(px(1.), px(3.))
+                    .color(theme.colors.focus)
+                    .radius(theme.radii.medium),
+            )
+        } else {
+            element
+        };
+        element.child(Text::new("Node").content())
     }
 }

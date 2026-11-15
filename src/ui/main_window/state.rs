@@ -71,4 +71,23 @@ impl EditState {
             }
         }
     }
+    pub fn select_node(&mut self, id: Option<NodeId>, cx: &mut Context<Self>) {
+        let EditState::Opened {
+            selected_node,
+            client,
+            ..
+        } = self
+        else {
+            warn!("No media opened, cannot change selected node");
+            return;
+        };
+        if let Some(id) = id {
+            if let None = client.get_workflow().get_node(id) {
+                warn!("Selected node not exists");
+                return;
+            }
+        }
+        *selected_node = id;
+        cx.notify();
+    }
 }
