@@ -10,14 +10,6 @@ use crate::ui::get_theme;
 
 pub use gpui_kit::base::slider::SliderState;
 
-struct Empty;
-
-impl Render for Empty {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-    }
-}
-
 #[derive(IntoElement)]
 pub struct Text {
     content: SharedString,

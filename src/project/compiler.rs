@@ -463,7 +463,7 @@ impl<'workflow> Lowerer<'workflow> {
                 self.lower_node(node_index)?;
             }
         }
-        self.ir.output = self.value_of(self.workflow.output());
+        self.ir.output = self.value_of(self.workflow.output().expect("Output should connected"));
         Ok(self.ir)
     }
 

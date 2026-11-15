@@ -11,7 +11,7 @@ pub struct WorkFlow {
     // We stored the connection relation ship inside th node,
     // so we do not need edge vector.
     nodes: Vec<Node>,
-    output: Source,
+    output: Option<Source>,
     allocator: NodeIdAlloc,
     /// Derived DAG cache, the single source of truth is (nodes, output)
     graph: WorkFlowGraph,
@@ -126,7 +126,7 @@ impl Default for WorkFlow {
         let graph = WorkFlowGraph::build(&nodes).expect("default workflow must be a DAG");
         Self {
             nodes,
-            output: Source::Node(node_id),
+            output: Some(Source::Node(node_id)),
             allocator,
             graph,
         }
@@ -142,7 +142,7 @@ impl WorkFlow {
         self.nodes.iter().find(|node| node.node_id == id)
     }
 
-    pub fn output(&self) -> Source {
+    pub fn output(&self) -> Option<Source> {
         self.output
     }
 
@@ -183,7 +183,11 @@ impl WorkFlow {
     /// If cannot be compiled return None, else return Some(useful subset of graph)
     pub fn prepare_compile(&self) -> Option<HashSet<usize>> {
         let reachable = self.graph.reachable();
-        let Source::Node(output) = self.output else {
+        let Some(output) = self.output else {
+            // output is not connected
+            return None;
+        };
+        let Source::Node(output) = output else {
             // input -> output
             return Some(HashSet::new());
         };

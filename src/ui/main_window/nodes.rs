@@ -18,63 +18,9 @@ enum NodesState {
         /// Cached node cards, to avoid query workflow and rebuild everything
         /// from scratch every render pass.
         node_cards: HashMap<NodeId, Entity<NodeCard>>,
-        edge_cache: HashSet<Edge>,
+        edge_cache: HashMap<(Source, NodeId, PortId), Entity<Edge>>,
+        last_edge: Option<Entity<Edge>>,
     },
-}
-
-type PortId = usize;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct Edge {
-    from: Source,
-    to: (NodeId, PortId),
-}
-
-impl Edge {
-    fn collect(nodes: &[Node]) -> HashSet<Self> {
-        let live: HashSet<NodeId> = nodes.iter().map(|node| node.node_id).collect();
-        let mut edges = HashSet::new();
-
-        for node in nodes {
-            let to = node.node_id;
-            match &node.kind {
-                NodeKind::Normal {
-                    source: Some(source),
-                    ..
-                } => {
-                    let edge = Edge {
-                        from: *source,
-                        to: (to, 0),
-                    };
-                    if edge.is_live(&live) {
-                        edges.insert(edge);
-                    }
-                }
-                NodeKind::Merge { sources, .. } => {
-                    for (port, source) in sources.iter().enumerate() {
-                        let Some(source) = source else { continue };
-                        let edge = Edge {
-                            from: *source,
-                            to: (to, port),
-                        };
-                        if edge.is_live(&live) {
-                            edges.insert(edge);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        edges
-    }
-
-    fn is_live(&self, live: &HashSet<NodeId>) -> bool {
-        match self.from {
-            Source::Input => true,
-            Source::Node(id) => live.contains(&id),
-        }
-    }
 }
 
 impl Nodes {
@@ -95,43 +41,113 @@ impl Nodes {
         match edit_state.get_workflow() {
             Some(workflow) => {
                 let nodes: Vec<_> = workflow.nodes().iter().map(|node| node.clone()).collect();
+                let output = workflow.output();
                 if let NodesState::Inactive = &self.state {
                     self.state = NodesState::Active {
                         node_cards: HashMap::new(),
-                        edge_cache: HashSet::new(),
+                        edge_cache: HashMap::new(),
+                        last_edge: None,
                     };
                 }
                 let NodesState::Active {
                     node_cards,
                     edge_cache,
+                    last_edge,
                 } = &mut self.state
                 else {
                     unreachable!("Inactive state must have been normalized above");
                 };
-                // rerbuild node cards
                 let mut outdated: HashSet<_> = node_cards.keys().copied().collect();
+                // update node cards
                 for node in &nodes {
                     let id = node.node_id;
                     let selected = Some(id) == selected_node;
                     match node_cards.get_mut(&id) {
                         Some(card) => {
-                            card.update(cx, |this, _cx| {
+                            card.update(cx, |this, cx| {
                                 this.sync(node, selected);
+                                cx.notify();
                             });
                             outdated.remove(&id);
                         }
                         None => {
                             let card = cx
                                 .new(|_cx| NodeCard::new(&node, self.edit_state.clone(), selected));
-                            node_cards.insert(id, card);
+                            node_cards.insert(id, card.clone());
                         }
-                    }
+                    };
                 }
                 for id in outdated {
                     node_cards.remove(&id);
                 }
-                // rebuild edge cache
-                *edge_cache = Edge::collect(&nodes);
+                // update edge cache
+                let mut outdated: HashSet<_> = edge_cache.keys().copied().collect();
+                for node in &nodes {
+                    let id = node.node_id;
+                    let to_be_handled = match &node.kind {
+                        NodeKind::Normal {
+                            source: Some(source),
+                            ..
+                        } => {
+                            let port = 0;
+                            vec![(port, source)]
+                        }
+                        NodeKind::Merge { sources, .. } => sources
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(port, source)| {
+                                let Some(source) = source else {
+                                    return None;
+                                };
+                                Some((port, source))
+                            })
+                            .collect(),
+                        _ => {
+                            vec![]
+                        }
+                    };
+                    for (port, source) in to_be_handled {
+                        let to_node = node_cards
+                            .get(&id)
+                            .expect("Node has update before")
+                            .downgrade();
+                        let to = EdgeTo::Node(port, to_node);
+                        match edge_cache.get_mut(&(*source, id, port)) {
+                            Some(edge) => {
+                                edge.update(cx, |this, cx| {
+                                    this.sync(source, node_cards, to);
+                                    cx.notify();
+                                });
+                                outdated.remove(&(*source, id, port));
+                            }
+                            None => {
+                                let edge = cx.new(|_cx| Edge::new(source, node_cards, to));
+                                edge_cache.insert((*source, id, port), edge);
+                            }
+                        }
+                    }
+                }
+                for id in outdated {
+                    edge_cache.remove(&id);
+                }
+                // handle last edge
+                if let Some(output) = output {
+                    let to = EdgeTo::Output;
+                    match last_edge {
+                        Some(edge) => {
+                            edge.update(cx, |this, cx| {
+                                this.sync(&output, node_cards, to);
+                                cx.notify();
+                            });
+                        }
+                        None => {
+                            let edge = cx.new(|_cx| Edge::new(&output, node_cards, to));
+                            *last_edge = Some(edge)
+                        }
+                    }
+                } else {
+                    *last_edge = None;
+                }
             }
             None => {
                 self.state = NodesState::Inactive;
@@ -153,8 +169,13 @@ impl Render for Nodes {
                 NodesState::Active {
                     node_cards,
                     edge_cache: _,
+                    last_edge: _,
                 } => div()
                     .id("nodes-container")
+                    .relative()
+                    .size_full()
+                    .overflow_hidden()
+                    .children(node_cards.values().cloned())
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
@@ -162,11 +183,61 @@ impl Render for Nodes {
                                 .update(cx, |state, cx| state.select_node(None, cx));
                         }),
                     )
-                    .relative()
-                    .size_full()
-                    .children(node_cards.values().cloned())
                     .into_any_element(),
             })
+    }
+}
+
+type PortId = usize;
+
+struct Edge {
+    from: EdgeFrom,
+    to: EdgeTo,
+}
+
+enum EdgeFrom {
+    Node(WeakEntity<NodeCard>),
+    Input,
+}
+
+enum EdgeTo {
+    Node(PortId, WeakEntity<NodeCard>),
+    Output,
+}
+
+impl Edge {
+    fn new(source: &Source, node_cards: &HashMap<NodeId, Entity<NodeCard>>, to: EdgeTo) -> Self {
+        Self {
+            from: match source {
+                Source::Input => EdgeFrom::Input,
+                Source::Node(id) => {
+                    let node = node_cards
+                        .get(&id)
+                        .expect("Node has update before")
+                        .downgrade();
+                    EdgeFrom::Node(node)
+                }
+            },
+            to,
+        }
+    }
+    fn sync(
+        &mut self,
+        source: &Source,
+        node_cards: &HashMap<NodeId, Entity<NodeCard>>,
+        to: EdgeTo,
+    ) {
+        self.to = to;
+        self.from = match source {
+            Source::Input => EdgeFrom::Input,
+            Source::Node(id) => {
+                let node = node_cards
+                    .get(&id)
+                    .expect("Node has update before")
+                    .downgrade();
+                EdgeFrom::Node(node)
+            }
+        };
     }
 }
 
@@ -240,12 +311,9 @@ impl NodeCard {
         let diff = WorkFlowDiff {
             payload: WorkFlowDiffPayload::NodePos(self.id, self.pos),
         };
-        if let Err(e) = self
-            .edit_state
+        self.edit_state
             .update(cx, |state, cx| state.update(diff, cx))
-        {
-            warn!("Failed to commit node position: {e:#}");
-        }
+            .expect("Update node position should not failed");
     }
 }
 
@@ -272,7 +340,7 @@ impl Render for NodeCard {
                     cx.stop_propagation();
                 }),
             )
-            .on_drag(self.id, |_, _, _, cx| cx.new(|_| Empty))
+            .on_drag(self.id, |_, _, _, cx| cx.new(|_| Empty)) // we do not need any drag ghost, so construct a empty entity
             .on_drag_move::<NodeId>(cx.listener(|this, event: &DragMoveEvent<NodeId>, _, cx| {
                 this.drag_move(event, cx);
             }))
