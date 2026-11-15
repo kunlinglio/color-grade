@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use gpui_kit::*;
 
-use crate::project::{Node, NodeId, NodeKind, Source};
+use crate::project::{Node, NodeId, NodeKind, Source, WorkFlowDiff, WorkFlowDiffPayload};
 use crate::ui::components::{Outline, Text};
 use crate::ui::get_theme;
 use crate::ui::main_window::state::EditState;
@@ -177,6 +177,13 @@ struct NodeCard {
     kind: NodeCardKind,
     /// Used to notify select and pos changed
     edit_state: Entity<EditState>,
+    /// States to support drag
+    drag: DragState,
+}
+
+enum DragState {
+    Empty,
+    Dragging(Point<Pixels>),
 }
 
 enum NodeCardKind {
@@ -200,6 +207,7 @@ impl NodeCard {
             pos: node.pos,
             kind,
             edit_state,
+            drag: DragState::Empty,
         }
     }
     fn sync(&mut self, node: &Node, selected: bool) {
@@ -212,6 +220,32 @@ impl NodeCard {
             },
             NodeKind::Generator { .. } => NodeCardKind::Generator {},
         };
+    }
+    fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
+        let position = event.event.position;
+        let DragState::Dragging(last) = &mut self.drag else {
+            self.drag = DragState::Dragging(position);
+            return;
+        };
+        let delta = position - *last;
+        *last = position;
+
+        self.pos.0 += f32::from(delta.x);
+        self.pos.1 += f32::from(delta.y);
+        cx.notify();
+    }
+
+    fn drag_finish(&mut self, cx: &mut Context<Self>) {
+        self.drag = DragState::Empty;
+        let diff = WorkFlowDiff {
+            payload: WorkFlowDiffPayload::NodePos(self.id, self.pos),
+        };
+        if let Err(e) = self
+            .edit_state
+            .update(cx, |state, cx| state.update(diff, cx))
+        {
+            warn!("Failed to commit node position: {e:#}");
+        }
     }
 }
 
@@ -237,7 +271,14 @@ impl Render for NodeCard {
                     });
                     cx.stop_propagation();
                 }),
-            );
+            )
+            .on_drag(self.id, |_, _, _, cx| cx.new(|_| Empty))
+            .on_drag_move::<NodeId>(cx.listener(|this, event: &DragMoveEvent<NodeId>, _, cx| {
+                this.drag_move(event, cx);
+            }))
+            .on_drop::<NodeId>(cx.listener(|this, _, _, cx| {
+                this.drag_finish(cx);
+            }));
         let element = if self.selected {
             element.child(
                 Outline::new(px(1.), px(3.))
