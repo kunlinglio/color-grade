@@ -315,7 +315,10 @@ struct NodeCard {
 
 enum DragState {
     Empty,
-    Dragging(Point<Pixels>),
+    Dragging {
+        start_pos: (f32, f32),
+        start_cursor: Point<Pixels>,
+    },
 }
 
 enum NodeCardKind {
@@ -343,8 +346,11 @@ impl NodeCard {
         }
     }
     fn sync(&mut self, node: &Node, selected: bool) {
-        self.pos = node.pos;
         self.selected = selected;
+        // To avoid sync interrupt dragging
+        if !matches!(self.drag, DragState::Dragging { .. }) {
+            self.pos = node.pos;
+        }
         self.kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
             NodeKind::Merge { sources, .. } => NodeCardKind::Merge {
@@ -355,26 +361,38 @@ impl NodeCard {
     }
     fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
         let position = event.event.position;
-        let DragState::Dragging(last) = &mut self.drag else {
-            self.drag = DragState::Dragging(position);
+        let DragState::Dragging {
+            start_pos,
+            start_cursor,
+        } = &mut self.drag
+        else {
             return;
         };
-        let delta = position - *last;
-        *last = position;
-
-        self.pos.0 += f32::from(delta.x);
-        self.pos.1 += f32::from(delta.y);
+        let delta = position - *start_cursor;
+        self.pos = (
+            start_pos.0 + f32::from(delta.x),
+            start_pos.1 + f32::from(delta.y),
+        );
         cx.notify();
     }
 
     fn drag_finish(&mut self, cx: &mut Context<Self>) {
+        let DragState::Dragging { start_pos, .. } = self.drag else {
+            warn!("Finish drag but drag state is not Empty");
+            return;
+        };
         self.drag = DragState::Empty;
         let diff = WorkFlowDiff {
             payload: WorkFlowDiffPayload::NodePos(self.id, self.pos),
         };
-        self.edit_state
+        if let Err(e) = self
+            .edit_state
             .update(cx, |state, cx| state.update(diff, cx))
-            .expect("Update node position should not failed");
+        {
+            self.pos = start_pos;
+            warn!("Failed to update workflow: {:#}", e);
+            return;
+        };
     }
     fn output_anchor(&self) -> Point<Pixels> {
         point(
@@ -414,7 +432,11 @@ impl Render for NodeCard {
             .border_color(theme.colors.border.subtle)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.drag = DragState::Dragging {
+                        start_pos: this.pos,
+                        start_cursor: event.position,
+                    };
                     this.edit_state.update(cx, |state, cx| {
                         state.select_node(Some(this.id), cx);
                     });
