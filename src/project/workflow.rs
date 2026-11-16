@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context;
+
 use crate::project::compiler::Compiler;
 use crate::render::{BlendMode, RenderList};
 
@@ -93,7 +95,7 @@ impl NodeKind {
         }
     }
     /// Return if diff legal
-    fn apply_diff(&mut self, diff: &NodeKindDiff) -> bool {
+    fn apply_diff(&mut self, diff: &NodeKindDiff) -> anyhow::Result<()> {
         match (self, diff) {
             (NodeKind::Normal { brightness, .. }, NodeKindDiff::Brightness(new)) => {
                 *brightness = *new;
@@ -104,9 +106,19 @@ impl NodeKind {
             (NodeKind::Merge { blend_mode, .. }, NodeKindDiff::BlendMode(new)) => {
                 *blend_mode = *new;
             }
-            _ => return false,
+            _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
-        true
+        Ok(())
+    }
+
+    fn verify_diff(&self, diff: &NodeKindDiff) -> anyhow::Result<()> {
+        match (self, diff) {
+            (NodeKind::Normal { .. }, NodeKindDiff::Brightness(..)) => {}
+            (NodeKind::Normal { .. }, NodeKindDiff::Saturation(..)) => {}
+            (NodeKind::Merge { .. }, NodeKindDiff::BlendMode(..)) => {}
+            _ => anyhow::bail!("Unmatch NodeKindDiff"),
+        }
+        Ok(())
     }
 }
 
@@ -154,6 +166,25 @@ impl WorkFlow {
         Compiler::new(optimize).compile(self)
     }
 
+    pub fn verify_diff(&self, diff: &WorkFlowDiff) -> anyhow::Result<()> {
+        match &diff.payload {
+            WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
+                let Some(node) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
+                    anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
+                };
+                node.kind.verify_diff(attr_diff).with_context(|| {
+                    format!("Cannot apply diff: diff does not match node {node_id} kind")
+                })?;
+            }
+            WorkFlowDiffPayload::NodePos(node_id, ..) => {
+                let Some(_) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
+                    anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
+                };
+            }
+        };
+        Ok(())
+    }
+
     /// Return whether need to rerender or the diff is invalid
     pub fn apply_diff(&mut self, diff: &WorkFlowDiff) -> anyhow::Result<bool> {
         let need_render = match &diff.payload {
@@ -161,9 +192,9 @@ impl WorkFlow {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
-                if !node.kind.apply_diff(attr_diff) {
-                    anyhow::bail!("Cannot apply diff: diff does not match node {node_id} kind");
-                }
+                node.kind.apply_diff(attr_diff).with_context(|| {
+                    format!("Cannot apply diff: diff does not match node {node_id} kind")
+                })?;
                 true
             }
             WorkFlowDiffPayload::NodePos(node_id, new_pos) => {
@@ -353,18 +384,18 @@ impl WorkFlowGraph {
 
 /// Store a diff for incremental update
 /// Only support update one node in a time
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct WorkFlowDiff {
     pub payload: WorkFlowDiffPayload,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum WorkFlowDiffPayload {
     NodeAttr(NodeId, NodeKindDiff),
     NodePos(NodeId, (f32, f32)),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum NodeKindDiff {
     Brightness(f32),
     Saturation(f32),

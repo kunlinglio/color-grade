@@ -82,14 +82,17 @@ impl SessionClient {
     }
 
     pub fn update_workflow(&mut self, diff: WorkFlowDiff) -> anyhow::Result<()> {
+        self.workflow.verify_diff(&diff)?;
+        let Ok(_) = self.cmd_tx.unbounded_send(Command::Update { diff }) else {
+            anyhow::bail!("Failed to update workflow, because the Session has quit");
+        };
         // Apply to workflow copy.
         // Since the copy is always synchronous with workflow inside Session,
         // so if this passed, the session will not return error, and we do not
         // need to wait for result comes from background threads.
-        self.workflow.apply_diff(&diff)?;
-        let Ok(_) = self.cmd_tx.unbounded_send(Command::Update { diff }) else {
-            anyhow::bail!("Failed to update workflow, because the Session has quit");
-        };
+        self.workflow
+            .apply_diff(&diff)
+            .expect("Verified diff should not be illegal");
         Ok(())
     }
 }
