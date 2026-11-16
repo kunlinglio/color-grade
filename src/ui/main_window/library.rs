@@ -8,7 +8,6 @@ use gpui_kit::*;
 use strum::EnumIter;
 
 use crate::media;
-use crate::media::comm::MediaSubscription;
 use crate::media::media_type::Media;
 use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
@@ -114,6 +113,7 @@ pub struct Library {
     list_scroll_handle: UniformListScrollHandle,
     thumbnail_size: ThumbnailSize,
     width: Pixels,
+    _listen_task: Task<()>,
 }
 
 impl Library {
@@ -122,40 +122,20 @@ impl Library {
         runtime: ProjectRuntimeHandler,
         edit_state: Entity<EditState>,
     ) -> Self {
-        cx.spawn(async move |this, cx| {
+        let _listen_task = cx.spawn(async move |this, cx| {
             let runtime = this
                 .read_with(cx, |this, _cx| this.runtime.clone())
                 .unwrap();
             // Begin scanning media
-            let media_rx = runtime.listen_on_media().await;
+            let mut rx = runtime.listen_on_media().await;
             let thumbnail_client = runtime.subscribe_thumbnails().await;
-            let _ = this.update_in(cx, |library, _window, cx| {
-                library.start(cx, media_rx, thumbnail_client);
+            let updated = this.update(cx, |library, _cx| {
+                library.client = Some(thumbnail_client);
             });
-        })
-        .detach();
-        Library {
-            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
-            thumbnails: HashMap::new(),
-            to_drop: Vec::new(),
-            edit_state,
-            runtime,
-            client: None,
-            list_scroll_handle: UniformListScrollHandle::new(),
-            thumbnail_size: ThumbnailSize::Px256,
-            width: px(200.),
-        }
-    }
-
-    /// Monitor media events.
-    fn start(
-        &mut self,
-        cx: &mut Context<Self>,
-        mut rx: MediaSubscription,
-        thumbnail_client: ThumbnailManagerClient,
-    ) {
-        self.client = Some(thumbnail_client);
-        cx.spawn(async move |this, cx| {
+            if updated.is_err() {
+                // The library has dropped
+                return;
+            }
             while let Some(e) = rx.get().await {
                 match e {
                     media::comm::Event::Sync(list) => {
@@ -172,8 +152,19 @@ impl Library {
                     }
                 }
             }
-        })
-        .detach();
+        });
+        Library {
+            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
+            thumbnails: HashMap::new(),
+            to_drop: Vec::new(),
+            edit_state,
+            runtime,
+            client: None,
+            list_scroll_handle: UniformListScrollHandle::new(),
+            thumbnail_size: ThumbnailSize::Px256,
+            width: px(200.),
+            _listen_task,
+        }
     }
 
     fn fetch_thumbs(&mut self, new_visible: HashSet<Arc<Media>>, cx: &mut Context<Self>) {

@@ -11,7 +11,9 @@ use crate::ui::main_window::EditState;
 pub struct Inspector {
     edit_state: Entity<EditState>,
     brightness: Entity<SliderState>,
+    _brightness_sub: Subscription,
     saturation: Entity<SliderState>,
+    _saturation_sub: Subscription,
 }
 
 impl Inspector {
@@ -31,7 +33,7 @@ impl Inspector {
                 .default_value(1.0)
         });
 
-        cx.subscribe(&brightness, |this, _state, event, cx| {
+        let _brightness_sub = cx.subscribe(&brightness, |this, _state, event, cx| {
             if let SliderEvent::Change(SliderValue::Single(value)) = event {
                 let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
                     return;
@@ -48,10 +50,9 @@ impl Inspector {
                     this.sync(cx);
                 };
             }
-        })
-        .detach();
+        });
 
-        cx.subscribe(&saturation, |this, _state, event, cx| {
+        let _saturation_sub = cx.subscribe(&saturation, |this, _state, event, cx| {
             if let SliderEvent::Change(SliderValue::Single(value)) = event {
                 let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
                     return;
@@ -68,8 +69,7 @@ impl Inspector {
                     this.sync(cx);
                 };
             }
-        })
-        .detach();
+        });
 
         cx.observe(&edit_state, |this, _state, cx| {
             this.sync(cx);
@@ -78,7 +78,9 @@ impl Inspector {
 
         Inspector {
             brightness,
+            _brightness_sub,
             saturation,
+            _saturation_sub,
             edit_state,
         }
     }

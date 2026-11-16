@@ -49,24 +49,14 @@ pub struct Scopes {
     runtime: ProjectRuntimeHandler,
 
     chosen: ChosenScope,
+
+    _frame_listen_task: Option<Task<()>>,
+    _scope_update_task: Option<Task<()>>,
 }
 
 impl Scopes {
-    pub fn new(runtime: ProjectRuntimeHandler) -> Self {
-        Scopes {
-            waveform: None,
-            vectorscope: None,
-            y_histogram: None,
-            rgb_histogram: None,
-            gram_size: None,
-            last_frame: None,
-            runtime,
-            chosen: ChosenScope::Waveform,
-        }
-    }
-
-    pub fn init(&self, cx: &mut Context<Self>, window: &mut Window) {
-        cx.spawn_in(window, async move |this, cx| {
+    pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
+        cx.spawn(async move |this, cx| {
             let Ok(runtime) = this.read_with(cx, |this, _cx| this.runtime.clone()) else {
                 return;
             };
@@ -77,6 +67,18 @@ impl Scopes {
             });
         })
         .detach();
+        Scopes {
+            waveform: None,
+            vectorscope: None,
+            y_histogram: None,
+            rgb_histogram: None,
+            gram_size: None,
+            last_frame: None,
+            runtime,
+            chosen: ChosenScope::Waveform,
+            _frame_listen_task: None,
+            _scope_update_task: None,
+        }
     }
 
     fn start(
@@ -87,25 +89,23 @@ impl Scopes {
         mut scope_stream: FrameStream<ScopeGraph>,
     ) {
         // Feed the scope pipeline with the latest backend frame.
-        cx.spawn_in(window, async move |this, cx| {
+        self._frame_listen_task = Some(cx.spawn_in(window, async move |this, cx| {
             while let Some((backend_frame, _)) = frame_stream.next_frame().await {
                 let _ = this.update(cx, move |this, _cx| {
                     this.request_update_gram(backend_frame);
                 });
             }
-        })
-        .detach();
+        }));
 
         // Display the latest scope graph.
-        cx.spawn_in(window, async move |this, cx| {
+        self._scope_update_task = Some(cx.spawn_in(window, async move |this, cx| {
             while let Some(graph) = scope_stream.next_frame().await {
                 let _ = this.update_in(cx, |scopes, window, cx| {
                     scopes.apply(graph, window);
                     cx.notify();
                 });
             }
-        })
-        .detach();
+        }));
     }
 
     fn apply(&mut self, graph: ScopeGraph, window: &mut Window) {

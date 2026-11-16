@@ -29,7 +29,7 @@ pub struct MainWindow {
     inspector: Entity<inspector::Inspector>,
     scopes: Entity<scopes::Scopes>,
     /// Handler for communicating with ProjectRuntime
-    runtime: ProjectRuntimeHandler,
+    _runtime: ProjectRuntimeHandler,
 }
 
 impl MainWindow {
@@ -49,12 +49,12 @@ impl MainWindow {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or("Unknown Project".to_string());
 
-        let monitor = cx.new(|_cx| monitor::Monitor::new());
+        let monitor = cx.new(|cx| monitor::Monitor::new(cx, runtime.clone()));
         let edit_state = cx.new(|_cx| EditState::new());
         let library = cx.new(|cx| library::Library::new(cx, runtime.clone(), edit_state.clone()));
         let nodes = cx.new(|cx| nodes::Nodes::new(cx, edit_state.clone()));
         let inspector = cx.new(|cx| inspector::Inspector::new(cx, edit_state.clone()));
-        let scopes = cx.new(|_cx| scopes::Scopes::new(runtime.clone()));
+        let scopes = cx.new(|cx| scopes::Scopes::new(cx, runtime.clone()));
         MainWindow {
             path,
             title,
@@ -63,15 +63,8 @@ impl MainWindow {
             nodes,
             inspector,
             scopes,
-            runtime,
+            _runtime: runtime,
         }
-    }
-
-    fn init<'a>(&mut self, window: &mut Window, cx: &mut Context<'a, Self>) {
-        self.monitor.update(cx, |monitor, cx| {
-            monitor.init(cx, window, self.runtime.clone())
-        });
-        self.scopes.update(cx, |scopes, cx| scopes.init(cx, window));
     }
 
     pub fn open(app: &mut App, runtime: ProjectRuntimeHandler, project_path: PathBuf) {
@@ -94,11 +87,8 @@ impl MainWindow {
             app_owns_titlebar_drag: true,
             ..Default::default()
         };
-        gpui_kit::open_window(options, app, |window, app| {
+        gpui_kit::open_window(options, app, |_window, app| {
             let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime, project_path));
-            main_window_handler.update(app, |main_window, cx| {
-                main_window.init(window, cx);
-            });
             main_window_handler
         })
         .expect("Failed to open MainWindow");

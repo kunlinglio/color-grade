@@ -4,51 +4,31 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::ProjectRuntimeHandler;
-use crate::render::{BackendFrame, FrameStream, RenderedFrame};
+use crate::render::RenderedFrame;
 use crate::ui::components::{Icon, Text};
 use crate::ui::get_theme;
 
 pub struct Monitor {
     image: Option<Arc<RenderImage>>,
+    _listen_task: Task<()>,
 }
 
 impl Monitor {
-    pub fn new() -> Self {
-        Monitor { image: None }
-    }
-
-    pub fn init(
-        &self,
-        cx: &mut Context<Self>,
-        window: &mut Window,
-        runtime: ProjectRuntimeHandler,
-    ) {
-        cx.spawn_in(window, async move |this, cx| {
+    pub fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler) -> Self {
+        let _listen_task = cx.spawn(async move |this, cx| {
             // Subscribe to the render stream.
-            let frame_stream = runtime.subscribe_frame_stream().await;
-            let _ = this.update_in(cx, |monitor, window, cx| {
-                monitor.start(window, cx, frame_stream);
-            });
-        })
-        .detach();
-    }
-
-    /// Start to monitor the result from RenderPipe
-    fn start(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        mut frame_stream: FrameStream<(BackendFrame, Arc<RenderedFrame>)>,
-    ) {
-        cx.spawn_in(window, async move |this, cx| {
+            let mut frame_stream = runtime.subscribe_frame_stream().await;
             while let Some((_, frame)) = frame_stream.next_frame().await {
                 let _ = this.update_in(cx, |monitor, window, cx| {
                     monitor.apply_buffer(window, frame);
                     cx.notify();
                 });
             }
-        })
-        .detach();
+        });
+        Monitor {
+            image: None,
+            _listen_task,
+        }
     }
 
     fn apply_buffer(&mut self, window: &mut Window, frame: Arc<RenderedFrame>) {

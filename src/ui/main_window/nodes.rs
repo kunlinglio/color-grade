@@ -195,6 +195,7 @@ type PortId = usize;
 struct Edge {
     from: EdgeFrom,
     to: EdgeTo,
+    _subscriptions: Vec<Subscription>,
 }
 
 enum EdgeFrom {
@@ -224,17 +225,22 @@ impl Edge {
                 EdgeFrom::Node(node)
             }
         };
+        let mut _subscriptions = Vec::new();
         if let EdgeFrom::Node(card) = &from {
             if let Some(card) = card.upgrade() {
-                cx.observe(&card, |_, _, cx| cx.notify()).detach();
+                _subscriptions.push(cx.observe(&card, |_, _, cx| cx.notify()));
             }
         }
         if let EdgeTo::Node(_, card) = &to {
             if let Some(card) = card.upgrade() {
-                cx.observe(&card, |_, _, cx| cx.notify()).detach();
+                _subscriptions.push(cx.observe(&card, |_, _, cx| cx.notify()));
             }
         }
-        Self { from, to }
+        Self {
+            from,
+            to,
+            _subscriptions,
+        }
     }
     fn anchors(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {
         let from = match &self.from {
