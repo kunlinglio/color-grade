@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use gpui_kit::base::StyledExt;
 use gpui_kit::*;
 
 use crate::project::{Node, NodeId, NodeKind, Source, WorkFlowDiff, WorkFlowDiffPayload};
@@ -234,44 +235,47 @@ impl Nodes {
 impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.weak_entity();
-        div().size_full().child(
-            ResizeSensitive::new()
-                .size_full()
-                .on_resize(move |bounds, _window, app| {
-                    let _ = this.update(app, |this, _cx| {
-                        let width = f32::from(bounds.size.width);
-                        let height = f32::from(bounds.size.height);
-                        *this.size.borrow_mut() = (width, height);
-                    });
-                })
-                .child(Text::new("Nodes").title())
-                .child(match &self.state {
-                    NodesState::Inactive => Text::new("Select a Media to active nodes")
-                        .content()
-                        .into_any_element(),
-                    NodesState::Active {
-                        node_cards,
-                        edge_cache,
-                        last_edge,
-                    } => div()
-                        .id("nodes-container")
-                        .relative()
-                        .size_full()
-                        .overflow_hidden()
-                        .children(edge_cache.values().cloned())
-                        .children(last_edge.iter().cloned())
-                        .children(node_cards.values().cloned())
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let id = cx.entity_id();
-                                this.edit_state
-                                    .update(cx, |state, cx| state.select_node(None, id, cx));
-                            }),
-                        )
-                        .into_any_element(),
-                }),
-        )
+        div()
+            .size_full()
+            .v_flex()
+            .child(Text::new("Nodes").title())
+            .child(
+                ResizeSensitive::new()
+                    .flex_1()
+                    .on_resize(move |bounds, _window, app| {
+                        let _ = this.update(app, |this, _cx| {
+                            let width = f32::from(bounds.size.width);
+                            let height = f32::from(bounds.size.height);
+                            *this.size.borrow_mut() = (width, height);
+                        });
+                    })
+                    .child(match &self.state {
+                        NodesState::Inactive => Text::new("Select a Media to active nodes")
+                            .content()
+                            .into_any_element(),
+                        NodesState::Active {
+                            node_cards,
+                            edge_cache,
+                            last_edge,
+                        } => div()
+                            .id("nodes-container")
+                            .relative()
+                            .size_full()
+                            .overflow_hidden()
+                            .children(edge_cache.values().cloned())
+                            .children(last_edge.iter().cloned())
+                            .children(node_cards.values().cloned())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    let id = cx.entity_id();
+                                    this.edit_state
+                                        .update(cx, |state, cx| state.select_node(None, id, cx));
+                                }),
+                            )
+                            .into_any_element(),
+                    }),
+            )
     }
 }
 
@@ -467,7 +471,7 @@ impl NodeCard {
         };
     }
     fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
-        let position = event.event.position;
+        let cur_cursor = event.event.position;
         let DragState::Dragging {
             start_pos,
             start_cursor,
@@ -475,39 +479,40 @@ impl NodeCard {
         else {
             return;
         };
-        let target = (
-            start_pos.0 + f32::from(position.x - start_cursor.x),
-            start_pos.1 + f32::from(position.y - start_cursor.y),
+        let target_pos = (
+            start_pos.0 + f32::from(cur_cursor.x - start_cursor.x),
+            start_pos.1 + f32::from(cur_cursor.y - start_cursor.y),
         );
         let size = self.nodes_size.borrow();
-        self.pos = Self::clamp_towards((size.0 / 2., size.1 / 2.), target, *size);
+        // Clamp node pos inside bounds
+        let pos = {
+            // bounds to pos
+            let x_bounds = (
+                0. + NODES_PADDING,
+                (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING),
+            );
+            let y_bounds = (
+                0. + NODES_PADDING,
+                (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING),
+            );
+            let anchor = (size.0 / 2., size.1 / 2.);
+            let (dx, dy) = (target_pos.0 - anchor.0, target_pos.1 - anchor.1);
+            let mut t = 1.0f32;
+            if dx > 0.0 {
+                t = t.min((x_bounds.1 - anchor.0) / dx);
+            } else if dx < 0.0 {
+                t = t.min((x_bounds.0 - anchor.0) / dx);
+            }
+            if dy > 0.0 {
+                t = t.min((y_bounds.1 - anchor.1) / dy);
+            } else if dy < 0.0 {
+                t = t.min((y_bounds.0 - anchor.1) / dy);
+            }
+            let t = t.clamp(0.0, 1.0);
+            (anchor.0 + dx * t, anchor.1 + dy * t)
+        };
+        self.pos = pos;
         cx.notify();
-    }
-    fn clamp_towards(anchor: (f32, f32), target: (f32, f32), bounds: (f32, f32)) -> (f32, f32) {
-        let (w, h) = (f32::from(bounds.0), f32::from(bounds.1));
-        if w <= 0.0 || h <= 0.0 {
-            return target;
-        }
-        let max_x = (w - NODE_WIDTH).max(0.0);
-        let max_y = (h - NODE_HEIGHT).max(0.0);
-
-        let anchor = (anchor.0.clamp(0.0, max_x), anchor.1.clamp(0.0, max_y));
-        let (dx, dy) = (target.0 - anchor.0, target.1 - anchor.1);
-
-        let mut t = 1.0f32;
-        if dx > 0.0 {
-            t = t.min((max_x - anchor.0) / dx);
-        } else if dx < 0.0 {
-            t = t.min((0.0 - anchor.0) / dx);
-        }
-        if dy > 0.0 {
-            t = t.min((max_y - anchor.1) / dy);
-        } else if dy < 0.0 {
-            t = t.min((0.0 - anchor.1) / dy);
-        }
-        let t = t.clamp(0.0, 1.0);
-
-        (anchor.0 + dx * t, anchor.1 + dy * t)
     }
 
     fn drag_finish(&mut self, cx: &mut Context<Self>) {
@@ -602,6 +607,12 @@ impl Render for NodeCard {
         } else {
             element
         };
-        element.child(Text::new("Node").content())
+        element.child(
+            Text::new(format!(
+                "Nodes: \npos ({:.2}, {:.2})",
+                self.pos.0, self.pos.1
+            ))
+            .content(),
+        )
     }
 }
