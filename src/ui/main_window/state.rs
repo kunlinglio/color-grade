@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use gpui_kit::Context;
+use gpui_kit::{Context, EntityId, EventEmitter};
 
 use crate::media::media_type::Media;
-use crate::project::{NodeId, SessionClient, WorkFlow, WorkFlowDiff};
+use crate::project::{NodeId, SessionClient, WorkFlow, WorkFlowDiff, WorkFlowDiffPayload};
 
 /// A edit state shared by multiple panel inside mainwindow.
 /// Since they all need to edit on same data structure, so a unified
@@ -50,35 +50,50 @@ impl EditState {
         &mut self,
         new: Arc<Media>,
         client: SessionClient,
+        origin: EntityId,
         cx: &mut Context<'_, Self>,
     ) {
+        let previous = if let Self::Opened { media, .. } = self {
+            Some(media.clone())
+        } else {
+            None
+        };
         *self = Self::Opened {
             client,
-            media: new,
+            media: new.clone(),
             selected_node: None,
         };
-        cx.notify();
+        cx.emit(SessionChanged {
+            origin,
+            previous,
+            current: Some(new),
+        });
     }
     /// Apply diff to workflow,
     /// returns if the diff validate
     pub fn update(
         &mut self,
         diff: WorkFlowDiff,
+        origin: EntityId,
         cx: &mut Context<Self>,
-        need_notify: bool,
     ) -> anyhow::Result<()> {
         match self {
             EditState::Empty => anyhow::bail!("No media opened"),
             EditState::Opened { client, .. } => {
                 client.update_workflow(diff)?;
-                if need_notify {
-                    cx.notify();
+                match diff.payload {
+                    WorkFlowDiffPayload::NodeAttr(node_id, ..) => {
+                        cx.emit(NodeAttrChanged { node_id, origin });
+                    }
+                    WorkFlowDiffPayload::NodePos(node_id, ..) => {
+                        cx.emit(NodePosChanged { node_id, origin })
+                    }
                 }
                 Ok(())
             }
         }
     }
-    pub fn select_node(&mut self, id: Option<NodeId>, cx: &mut Context<Self>) {
+    pub fn select_node(&mut self, id: Option<NodeId>, origin: EntityId, cx: &mut Context<Self>) {
         let EditState::Opened {
             selected_node,
             client,
@@ -95,9 +110,48 @@ impl EditState {
             }
         }
         if *selected_node == id {
+            // not changed
             return;
         }
+        let previous = *selected_node;
         *selected_node = id;
-        cx.notify();
+        cx.emit(SelectedNodeChanged {
+            previous: previous,
+            current: id,
+            origin,
+        });
     }
 }
+
+pub struct SelectedNodeChanged {
+    pub origin: EntityId,
+    pub previous: Option<NodeId>,
+    pub current: Option<NodeId>,
+}
+
+pub struct SessionChanged {
+    pub origin: EntityId,
+    pub previous: Option<Arc<Media>>,
+    pub current: Option<Arc<Media>>,
+}
+
+pub struct NodeAttrChanged {
+    pub origin: EntityId,
+    pub node_id: NodeId,
+}
+
+pub struct NodePosChanged {
+    pub origin: EntityId,
+    pub node_id: NodeId,
+}
+
+/// TODO: Support topo change
+pub struct WorkflowTopoChanged {
+    pub origin: EntityId,
+}
+
+impl EventEmitter<SessionChanged> for EditState {}
+impl EventEmitter<SelectedNodeChanged> for EditState {}
+impl EventEmitter<NodeAttrChanged> for EditState {}
+impl EventEmitter<WorkflowTopoChanged> for EditState {}
+impl EventEmitter<NodePosChanged> for EditState {}

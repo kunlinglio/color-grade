@@ -5,7 +5,7 @@ use gpui_kit::*;
 
 use crate::project::{NodeKind, NodeKindDiff, WorkFlowDiff, WorkFlowDiffPayload};
 use crate::ui::components::{Slider, Text};
-use crate::ui::main_window::EditState;
+use crate::ui::main_window::{EditState, state};
 
 /// Color grading panel
 pub struct Inspector {
@@ -45,7 +45,8 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx, false)) {
+                let id = cx.entity_id();
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx)) {
                     warn!("Failed to apply brightness changes: {:#}", e);
                     this.sync(cx);
                 };
@@ -64,16 +65,39 @@ impl Inspector {
                     ),
                 };
                 let edit_state = this.edit_state.clone();
-                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, cx, false)) {
+                let id = cx.entity_id();
+                if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx)) {
                     warn!("Failed to apply saturation changes: {:#}", e);
                     this.sync(cx);
                 };
             }
         });
 
-        cx.observe(&edit_state, |this, _state, cx| {
-            this.sync(cx);
-        })
+        cx.subscribe(
+            &edit_state,
+            |this, _edit_state, _event: &state::SessionChanged, cx| {
+                this.sync(cx);
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &edit_state,
+            |this, _edit_state, _event: &state::SelectedNodeChanged, cx| {
+                this.sync(cx);
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &edit_state,
+            |_this, _edit_state, event: &state::NodeAttrChanged, cx| {
+                let id = cx.entity_id();
+                assert_eq!(
+                    id, event.origin,
+                    "The selected node attributes should only be changed by inspector"
+                )
+                // nothing to do, the sliders will update its own  state
+            },
+        )
         .detach();
 
         Inspector {

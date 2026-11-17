@@ -5,7 +5,7 @@ use gpui_kit::*;
 use crate::project::{Node, NodeId, NodeKind, Source, WorkFlowDiff, WorkFlowDiffPayload};
 use crate::ui::components::{Outline, Text};
 use crate::ui::get_theme;
-use crate::ui::main_window::state::EditState;
+use crate::ui::main_window::state::{self, EditState};
 
 pub struct Nodes {
     edit_state: Entity<EditState>,
@@ -25,9 +25,64 @@ enum NodesState {
 
 impl Nodes {
     pub fn new(cx: &mut Context<Self>, edit_state: Entity<EditState>) -> Self {
-        cx.observe(&edit_state, |this, _entity, cx| {
-            this.sync(cx);
-        })
+        cx.subscribe(
+            &edit_state,
+            |this, _edit_state, _event: &state::SessionChanged, cx| {
+                this.sync(cx);
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &edit_state,
+            |this, _edit_state, event: &state::SelectedNodeChanged, cx| {
+                let state::SelectedNodeChanged {
+                    previous,
+                    current,
+                    origin,
+                } = event;
+                let id = cx.entity_id();
+                assert_eq!(
+                    id, *origin,
+                    "The selected node should only be changed by nodes"
+                );
+                let NodesState::Active { node_cards, .. } = &mut this.state else {
+                    return;
+                };
+                if let Some(previous) = previous {
+                    if let Some(card) = node_cards.get(previous) {
+                        card.update(cx, |this, _cx| {
+                            this.selected = false;
+                        })
+                    }
+                }
+                if let Some(current) = current {
+                    if let Some(card) = node_cards.get(current) {
+                        card.update(cx, |this, _cx| {
+                            this.selected = false;
+                        })
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &edit_state,
+            |_this, _edit_state, event: &state::NodePosChanged, cx| {
+                let id = cx.entity_id();
+                assert_eq!(
+                    id, event.origin,
+                    "The node position should only be changed by nodes"
+                )
+                // nothing to do, the node card will update its own select state
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &edit_state,
+            |_this, _edit_state, _event: &state::WorkflowTopoChanged, _cx| {
+                todo!("Implement workflow topology change")
+            },
+        )
         .detach();
         Nodes {
             edit_state,
@@ -71,8 +126,10 @@ impl Nodes {
                             outdated.remove(&id);
                         }
                         None => {
-                            let card = cx
-                                .new(|_cx| NodeCard::new(&node, self.edit_state.clone(), selected));
+                            let entity_id = cx.entity_id();
+                            let card = cx.new(|_cx| {
+                                NodeCard::new(&node, self.edit_state.clone(), selected, entity_id)
+                            });
                             node_cards.insert(id, card.clone());
                         }
                     };
@@ -181,8 +238,9 @@ impl Render for Nodes {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
+                            let id = cx.entity_id();
                             this.edit_state
-                                .update(cx, |state, cx| state.select_node(None, cx));
+                                .update(cx, |state, cx| state.select_node(None, id, cx));
                         }),
                     )
                     .into_any_element(),
@@ -310,6 +368,7 @@ const NODE_HEIGHT: f32 = 72.;
 
 struct NodeCard {
     id: NodeId,
+    nodes_entity_id: EntityId,
     selected: bool,
     pos: (f32, f32),
     kind: NodeCardKind,
@@ -334,7 +393,12 @@ enum NodeCardKind {
 }
 
 impl NodeCard {
-    fn new(node: &Node, edit_state: Entity<EditState>, selected: bool) -> Self {
+    fn new(
+        node: &Node,
+        edit_state: Entity<EditState>,
+        selected: bool,
+        nodes_entity_id: EntityId,
+    ) -> Self {
         let kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
             NodeKind::Merge { sources, .. } => NodeCardKind::Merge {
@@ -344,6 +408,7 @@ impl NodeCard {
         };
         Self {
             id: node.node_id,
+            nodes_entity_id,
             selected: selected,
             pos: node.pos,
             kind,
@@ -393,7 +458,7 @@ impl NodeCard {
         };
         if let Err(e) = self
             .edit_state
-            .update(cx, |state, cx| state.update(diff, cx, false))
+            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
         {
             self.pos = start_pos;
             warn!("Failed to update workflow: {:#}", e);
@@ -444,7 +509,7 @@ impl Render for NodeCard {
                         start_cursor: event.position,
                     };
                     this.edit_state.update(cx, |state, cx| {
-                        state.select_node(Some(this.id), cx);
+                        state.select_node(Some(this.id), this.nodes_entity_id, cx);
                     });
                     cx.stop_propagation();
                 }),

@@ -12,7 +12,7 @@ use crate::media::media_type::Media;
 use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
 use crate::ui::components::{Icon, Loading, ResizeSensitive, SelectOption, SingleSelect, Text};
-use crate::ui::main_window::EditState;
+use crate::ui::main_window::{EditState, state};
 use crate::ui::{Theme, get_theme};
 
 /// The constant to control how many thumbnails will be loaded.
@@ -113,7 +113,8 @@ pub struct Library {
     list_scroll_handle: UniformListScrollHandle,
     thumbnail_size: ThumbnailSize,
     width: Pixels,
-    _listen_task: Task<()>,
+    _listen_media_task: Task<()>,
+    _listen_edit_sub: Subscription,
 }
 
 impl Library {
@@ -122,7 +123,7 @@ impl Library {
         runtime: ProjectRuntimeHandler,
         edit_state: Entity<EditState>,
     ) -> Self {
-        let _listen_task = cx.spawn(async move |this, cx| {
+        let _listen_media_task = cx.spawn(async move |this, cx| {
             let runtime = this
                 .read_with(cx, |this, _cx| this.runtime.clone())
                 .unwrap();
@@ -153,6 +154,17 @@ impl Library {
                 }
             }
         });
+        let _listen_edit_sub = cx.subscribe(
+            &edit_state,
+            |_this, _edit_state, event: &state::SessionChanged, cx| {
+                let id = cx.entity_id();
+                assert_eq!(
+                    id, event.origin,
+                    "The session should only be changed by Library"
+                )
+                // Nothing to do for now, since we use edit state directly when render
+            },
+        );
         Library {
             media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
             thumbnails: HashMap::new(),
@@ -163,7 +175,8 @@ impl Library {
             list_scroll_handle: UniformListScrollHandle::new(),
             thumbnail_size: ThumbnailSize::Px256,
             width: px(200.),
-            _listen_task,
+            _listen_media_task,
+            _listen_edit_sub,
         }
     }
 
@@ -243,6 +256,29 @@ impl Library {
         }
         cx.notify();
     }
+
+    fn select_media(&mut self, new: Arc<Media>, cx: &mut Context<Self>, window: &mut Window) {
+        let old = self.edit_state.read(cx).get_selected_media();
+        if let Some(old) = old {
+            if old == new {
+                return;
+            }
+        }
+        let runtime = self.runtime.clone();
+        let this = cx.entity();
+        window
+            .spawn(cx, async move |app| {
+                let client = runtime.open_media(&new.path).await;
+                let _ = this.update(app, |library, cx| {
+                    let id = cx.entity_id();
+                    library.edit_state.update(cx, |editor, cx| {
+                        editor.open_media(new, client, id, cx);
+                    });
+                    cx.notify();
+                });
+            })
+            .detach();
+    }
 }
 
 impl Render for Library {
@@ -250,7 +286,6 @@ impl Render for Library {
         self.clean_texture(window);
         let theme = get_theme(cx);
         let medias_len = self.media_list.list.len();
-        let runtime = self.runtime.clone();
         let selected_media = self.edit_state.read(cx).get_selected_media();
         let this = cx.weak_entity();
         let this_for_select = this.clone();
@@ -302,7 +337,6 @@ impl Render for Library {
                     .child(media_list(
                         theme,
                         medias_len,
-                        runtime,
                         selected_media,
                         this,
                         self.list_scroll_handle.clone(),
@@ -315,7 +349,6 @@ impl Render for Library {
 fn media_list(
     theme: Theme,
     medias_len: usize,
-    runtime: ProjectRuntimeHandler,
     selected_media: Option<Arc<Media>>,
     this: WeakEntity<Library>,
     scroll_handle: UniformListScrollHandle,
@@ -361,8 +394,6 @@ fn media_list(
         rows.into_iter()
             .map(|(media, thumb)| {
                 let is_selected = selected_media.as_ref() == Some(&media);
-                let path = media.path.clone();
-                let runtime = runtime.clone();
                 let this = this.clone();
                 let card_width = (width - px(24.0)).max(px(1.0));
                 let card_height = card_width * PICTURE_RATIO;
@@ -375,21 +406,11 @@ fn media_list(
                     .flex()
                     .justify_center()
                     .rounded(theme.radii.large)
-                    .on_click(move |_event, _window, app| {
-                        let runtime = runtime.clone();
-                        let this = this.clone();
+                    .on_click(move |_event, window, app| {
                         let media = media.clone();
-                        let path = path.clone();
-                        app.spawn(async move |app| {
-                            let client = runtime.open_media(&path).await;
-                            let _ = this.update(app, |library, cx| {
-                                library.edit_state.update(cx, |editor, cx| {
-                                    editor.open_media(media, client, cx);
-                                });
-                                cx.notify();
-                            });
-                        })
-                        .detach();
+                        let _ = this.update(app, |library, cx| {
+                            library.select_media(media, cx, window);
+                        });
                     })
                     .child(render_thumb(theme, thumb));
 
