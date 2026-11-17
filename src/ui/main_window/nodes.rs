@@ -1,15 +1,20 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use gpui_kit::*;
 
 use crate::project::{Node, NodeId, NodeKind, Source, WorkFlowDiff, WorkFlowDiffPayload};
-use crate::ui::components::{Outline, Text};
+use crate::ui::components::{Outline, ResizeSensitive, Text};
 use crate::ui::get_theme;
 use crate::ui::main_window::state::{self, EditState};
+
+const NODES_PADDING: f32 = 16.;
 
 pub struct Nodes {
     edit_state: Entity<EditState>,
     state: NodesState,
+    size: Rc<RefCell<(f32, f32)>>,
 }
 
 enum NodesState {
@@ -58,7 +63,7 @@ impl Nodes {
                 if let Some(current) = current {
                     if let Some(card) = node_cards.get(current) {
                         card.update(cx, |this, _cx| {
-                            this.selected = false;
+                            this.selected = true;
                         })
                     }
                 }
@@ -87,6 +92,7 @@ impl Nodes {
         Nodes {
             edit_state,
             state: NodesState::Inactive,
+            size: Rc::new(RefCell::new((0., 0.))),
         }
     }
 
@@ -128,7 +134,13 @@ impl Nodes {
                         None => {
                             let entity_id = cx.entity_id();
                             let card = cx.new(|_cx| {
-                                NodeCard::new(&node, self.edit_state.clone(), selected, entity_id)
+                                NodeCard::new(
+                                    &node,
+                                    self.edit_state.clone(),
+                                    selected,
+                                    entity_id,
+                                    self.size.clone(),
+                                )
                             });
                             node_cards.insert(id, card.clone());
                         }
@@ -172,13 +184,16 @@ impl Nodes {
                         match edge_cache.get_mut(&(*source, id, port)) {
                             Some(edge) => {
                                 edge.update(cx, |this, cx| {
-                                    *this = Edge::new(cx, source, node_cards, to);
+                                    *this =
+                                        Edge::new(cx, source, node_cards, to, self.size.clone());
                                     cx.notify();
                                 });
                                 outdated.remove(&(*source, id, port));
                             }
                             None => {
-                                let edge = cx.new(|cx| Edge::new(cx, source, node_cards, to));
+                                let edge = cx.new(|cx| {
+                                    Edge::new(cx, source, node_cards, to, self.size.clone())
+                                });
                                 edge_cache.insert((*source, id, port), edge);
                             }
                         }
@@ -193,12 +208,14 @@ impl Nodes {
                     match last_edge {
                         Some(edge) => {
                             edge.update(cx, |this, cx| {
-                                *this = Edge::new(cx, &output, node_cards, to);
+                                *this = Edge::new(cx, &output, node_cards, to, self.size.clone());
                                 cx.notify();
                             });
                         }
                         None => {
-                            let edge = cx.new(|cx| Edge::new(cx, &output, node_cards, to));
+                            let edge = cx.new(|cx| {
+                                Edge::new(cx, &output, node_cards, to, self.size.clone())
+                            });
                             *last_edge = Some(edge)
                         }
                     }
@@ -216,35 +233,45 @@ impl Nodes {
 
 impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(Text::new("Nodes").title())
-            .child(match &self.state {
-                NodesState::Inactive => Text::new("Select a Media to active nodes")
-                    .content()
-                    .into_any_element(),
-                NodesState::Active {
-                    node_cards,
-                    edge_cache,
-                    last_edge,
-                } => div()
-                    .id("nodes-container")
-                    .relative()
-                    .size_full()
-                    .overflow_hidden()
-                    .children(edge_cache.values().cloned())
-                    .children(last_edge.iter().cloned())
-                    .children(node_cards.values().cloned())
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            let id = cx.entity_id();
-                            this.edit_state
-                                .update(cx, |state, cx| state.select_node(None, id, cx));
-                        }),
-                    )
-                    .into_any_element(),
-            })
+        let this = cx.weak_entity();
+        div().size_full().child(
+            ResizeSensitive::new()
+                .size_full()
+                .on_resize(move |bounds, _window, app| {
+                    let _ = this.update(app, |this, _cx| {
+                        let width = f32::from(bounds.size.width);
+                        let height = f32::from(bounds.size.height);
+                        *this.size.borrow_mut() = (width, height);
+                    });
+                })
+                .child(Text::new("Nodes").title())
+                .child(match &self.state {
+                    NodesState::Inactive => Text::new("Select a Media to active nodes")
+                        .content()
+                        .into_any_element(),
+                    NodesState::Active {
+                        node_cards,
+                        edge_cache,
+                        last_edge,
+                    } => div()
+                        .id("nodes-container")
+                        .relative()
+                        .size_full()
+                        .overflow_hidden()
+                        .children(edge_cache.values().cloned())
+                        .children(last_edge.iter().cloned())
+                        .children(node_cards.values().cloned())
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                let id = cx.entity_id();
+                                this.edit_state
+                                    .update(cx, |state, cx| state.select_node(None, id, cx));
+                            }),
+                        )
+                        .into_any_element(),
+                }),
+        )
     }
 }
 
@@ -253,6 +280,7 @@ type PortId = usize;
 struct Edge {
     from: EdgeFrom,
     to: EdgeTo,
+    nodes_size: Rc<RefCell<(f32, f32)>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -272,6 +300,7 @@ impl Edge {
         source: &Source,
         node_cards: &HashMap<NodeId, Entity<NodeCard>>,
         to: EdgeTo,
+        nodes_size: Rc<RefCell<(f32, f32)>>,
     ) -> Self {
         let from = match source {
             Source::Input => EdgeFrom::Input,
@@ -298,15 +327,19 @@ impl Edge {
             from,
             to,
             _subscriptions,
+            nodes_size,
         }
     }
     fn anchors(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {
         let from = match &self.from {
-            EdgeFrom::Input => point(px(16.0), px(96.0)), // Input port
+            EdgeFrom::Input => point(px(NODES_PADDING), px(self.nodes_size.borrow().1 / 2.)), // Input port
             EdgeFrom::Node(card) => card.upgrade()?.read(cx).output_anchor(),
         };
         let to = match &self.to {
-            EdgeTo::Output => point(px(720.0), px(96.0)), // Output port
+            EdgeTo::Output => point(
+                px(self.nodes_size.borrow().0 - NODES_PADDING),
+                px(self.nodes_size.borrow().1 / 2.),
+            ), // Output port
             EdgeTo::Node(port, card) => card.upgrade()?.read(cx).input_anchor(*port),
         };
         Some((from, to))
@@ -376,6 +409,7 @@ struct NodeCard {
     edit_state: Entity<EditState>,
     /// States to support drag
     drag: DragState,
+    nodes_size: Rc<RefCell<(f32, f32)>>,
 }
 
 enum DragState {
@@ -398,6 +432,7 @@ impl NodeCard {
         edit_state: Entity<EditState>,
         selected: bool,
         nodes_entity_id: EntityId,
+        nodes_size: Rc<RefCell<(f32, f32)>>,
     ) -> Self {
         let kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
@@ -414,6 +449,7 @@ impl NodeCard {
             kind,
             edit_state,
             drag: DragState::Empty,
+            nodes_size,
         }
     }
     fn sync(&mut self, node: &Node, selected: bool) {
@@ -439,17 +475,43 @@ impl NodeCard {
         else {
             return;
         };
-        let delta = position - *start_cursor;
-        self.pos = (
-            start_pos.0 + f32::from(delta.x),
-            start_pos.1 + f32::from(delta.y),
+        let target = (
+            start_pos.0 + f32::from(position.x - start_cursor.x),
+            start_pos.1 + f32::from(position.y - start_cursor.y),
         );
+        let size = self.nodes_size.borrow();
+        self.pos = Self::clamp_towards((size.0 / 2., size.1 / 2.), target, *size);
         cx.notify();
+    }
+    fn clamp_towards(anchor: (f32, f32), target: (f32, f32), bounds: (f32, f32)) -> (f32, f32) {
+        let (w, h) = (f32::from(bounds.0), f32::from(bounds.1));
+        if w <= 0.0 || h <= 0.0 {
+            return target;
+        }
+        let max_x = (w - NODE_WIDTH).max(0.0);
+        let max_y = (h - NODE_HEIGHT).max(0.0);
+
+        let anchor = (anchor.0.clamp(0.0, max_x), anchor.1.clamp(0.0, max_y));
+        let (dx, dy) = (target.0 - anchor.0, target.1 - anchor.1);
+
+        let mut t = 1.0f32;
+        if dx > 0.0 {
+            t = t.min((max_x - anchor.0) / dx);
+        } else if dx < 0.0 {
+            t = t.min((0.0 - anchor.0) / dx);
+        }
+        if dy > 0.0 {
+            t = t.min((max_y - anchor.1) / dy);
+        } else if dy < 0.0 {
+            t = t.min((0.0 - anchor.1) / dy);
+        }
+        let t = t.clamp(0.0, 1.0);
+
+        (anchor.0 + dx * t, anchor.1 + dy * t)
     }
 
     fn drag_finish(&mut self, cx: &mut Context<Self>) {
         let DragState::Dragging { start_pos, .. } = self.drag else {
-            warn!("Finish drag but drag state is not Empty");
             return;
         };
         self.drag = DragState::Empty;
@@ -514,13 +576,23 @@ impl Render for NodeCard {
                     cx.stop_propagation();
                 }),
             )
-            .on_drag(self.id, |_, _, _, cx| cx.new(|_| Empty)) // we do not need any drag ghost, so construct a empty entity
-            .on_drag_move::<NodeId>(cx.listener(|this, event: &DragMoveEvent<NodeId>, _, cx| {
-                this.drag_move(event, cx);
-            }))
-            .on_drop::<NodeId>(cx.listener(|this, _, _, cx| {
-                this.drag_finish(cx);
-            }));
+            // we do not need any drag ghost, so construct a empty entity
+            .on_drag(self.id, |_id, _point, _window, cx| cx.new(|_| Empty))
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<NodeId>, _window, cx| {
+                    this.drag_move(event, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.drag_finish(cx);
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| this.drag_finish(cx)),
+            );
         let element = if self.selected {
             element.child(
                 Outline::new(px(1.), px(3.))
