@@ -16,6 +16,7 @@ pub struct Nodes {
     edit_state: Entity<EditState>,
     state: NodesState,
     size: Rc<RefCell<(f32, f32)>>,
+    pos_hud: Entity<NodePosHud>,
 }
 
 enum NodesState {
@@ -92,10 +93,12 @@ impl Nodes {
             },
         )
         .detach();
+        let pos_hud = cx.new(|_cx| NodePosHud::new());
         Nodes {
             edit_state,
             state: NodesState::Inactive,
             size: Rc::new(RefCell::new((0., 0.))),
+            pos_hud,
         }
     }
 
@@ -136,6 +139,7 @@ impl Nodes {
                         }
                         None => {
                             let entity_id = cx.entity_id();
+                            let hud = self.pos_hud.downgrade();
                             let card = cx.new(|_cx| {
                                 NodeCard::new(
                                     &node,
@@ -143,6 +147,7 @@ impl Nodes {
                                     selected,
                                     entity_id,
                                     self.size.clone(),
+                                    hud,
                                 )
                             });
                             node_cards.insert(id, card.clone());
@@ -278,6 +283,7 @@ impl Render for Nodes {
                             .into_any_element(),
                     }),
             )
+            .child(self.pos_hud.clone())
     }
 }
 
@@ -416,6 +422,8 @@ struct NodeCard {
     /// States to support drag
     drag: DragState,
     nodes_size: Rc<RefCell<(f32, f32)>>,
+    /// Weak ref to Hud for update
+    pos_hud: WeakEntity<NodePosHud>,
 }
 
 enum DragState {
@@ -439,6 +447,7 @@ impl NodeCard {
         selected: bool,
         nodes_entity_id: EntityId,
         nodes_size: Rc<RefCell<(f32, f32)>>,
+        pos_hud: WeakEntity<NodePosHud>,
     ) -> Self {
         let kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
@@ -456,6 +465,7 @@ impl NodeCard {
             edit_state,
             drag: DragState::Empty,
             nodes_size,
+            pos_hud,
         }
     }
     fn sync(&mut self, node: &Node, selected: bool) {
@@ -493,6 +503,17 @@ impl NodeCard {
             target_pos.0.clamp(NODES_PADDING, max_x),
             target_pos.1.clamp(NODES_PADDING, max_y),
         );
+        if let Some(hud) = &mut self.pos_hud.upgrade() {
+            hud.update(cx, |this, cx| {
+                this.update(
+                    cx,
+                    PosInfo {
+                        x: self.pos.0,
+                        y: self.pos.1,
+                    },
+                );
+            })
+        }
         cx.notify();
     }
 
@@ -501,6 +522,11 @@ impl NodeCard {
             return;
         };
         self.drag = DragState::Empty;
+        if let Some(hud) = &mut self.pos_hud.upgrade() {
+            hud.update(cx, |this, cx| {
+                this.clear(cx);
+            })
+        }
         if self.pos == start_pos {
             return;
         }
@@ -591,12 +617,58 @@ impl Render for NodeCard {
         } else {
             element
         };
-        element.child(
-            Text::new(format!(
-                "Nodes: \npos ({:.2}, {:.2})",
-                self.pos.0, self.pos.1
-            ))
-            .content(),
-        )
+        element.child(Text::new("Nodes").content())
+    }
+}
+
+struct NodePosHud {
+    pos_info: Option<PosInfo>,
+}
+
+#[derive(PartialEq)]
+struct PosInfo {
+    x: f32,
+    y: f32,
+}
+
+impl NodePosHud {
+    fn new() -> Self {
+        Self { pos_info: None }
+    }
+    fn update(&mut self, cx: &mut Context<Self>, new: PosInfo) {
+        if let Some(pos_info) = &mut self.pos_info {
+            if *pos_info == new {
+                return;
+            }
+        }
+        self.pos_info = Some(new);
+        cx.notify();
+    }
+    fn clear(&mut self, cx: &mut Context<Self>) {
+        if self.pos_info == None {
+            return;
+        }
+        self.pos_info = None;
+        cx.notify();
+    }
+}
+
+impl Render for NodePosHud {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
+        let Some(info) = &self.pos_info else {
+            return div().into_any_element();
+        };
+
+        div()
+            .absolute()
+            .left(px(NODES_PADDING))
+            .bottom(px(NODES_PADDING))
+            .px_2()
+            .py_1()
+            .rounded(theme.radii.small)
+            .bg(theme.colors.background.elevated)
+            .child(Text::new(format!("x: {:.1}  y: {:.1}", info.x, info.y,)).content())
+            .into_any_element()
     }
 }
