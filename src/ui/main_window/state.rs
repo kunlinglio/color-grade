@@ -88,6 +88,9 @@ impl EditState {
                     WorkflowDiffPayload::NodePos(node_id, ..) => {
                         cx.emit(NodePosChanged { node_id, origin })
                     }
+                    WorkflowDiffPayload::Topology(_) => {
+                        cx.emit(WorkflowTopoChanged { origin });
+                    }
                 }
                 Ok(())
             }

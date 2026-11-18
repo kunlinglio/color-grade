@@ -10,7 +10,7 @@ pub type NodeId = u64;
 /// The editable grade workflow, owned by the runtime's [`EditSession`].
 #[derive(Clone, Debug)]
 pub struct Workflow {
-    // We stored the connection relation ship inside th node,
+    // We stored the connection relation ship inside the node,
     // so we do not need edge vector.
     nodes: Vec<Node>,
     output: Option<Source>,
@@ -81,16 +81,16 @@ pub enum GeneratorMode {
 }
 
 impl NodeKind {
-    fn default_normal() -> Self {
+    fn default_normal(source: Option<Source>) -> Self {
         Self::Normal {
-            source: None,
+            source,
             brightness: 1.0,
             saturation: 1.0,
         }
     }
-    fn default_merge() -> Self {
+    fn default_merge(sources: Vec<Option<Source>>) -> Self {
         Self::Merge {
-            sources: Vec::new(),
+            sources,
             blend_mode: BlendMode::Top,
         }
     }
@@ -119,6 +119,18 @@ impl NodeKind {
             _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
         Ok(())
+    }
+
+    fn source_slots_mut(&mut self) -> &mut [Option<Source>] {
+        match self {
+            NodeKind::Normal { source, .. } => std::slice::from_mut(source),
+            NodeKind::Merge { sources, .. } => sources,
+            NodeKind::Generator { .. } => &mut [],
+        }
+    }
+
+    fn sources_mut(&mut self) -> impl Iterator<Item = &mut Source> {
+        self.source_slots_mut().iter_mut().flatten()
     }
 }
 
@@ -151,7 +163,13 @@ impl Workflow {
     }
 
     pub fn get_node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.iter().find(|node| node.node_id == id)
+        // The derived graph keeps the id -> index map, so this is O(1).
+        self.graph.index_of(id).map(|index| &self.nodes[index])
+    }
+
+    fn node_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+        let index = self.graph.index_of(id)?;
+        self.nodes.get_mut(index)
     }
 
     pub fn output(&self) -> Option<Source> {
@@ -169,7 +187,7 @@ impl Workflow {
     pub fn verify_diff(&self, diff: &WorkflowDiff) -> anyhow::Result<()> {
         match &diff.payload {
             WorkflowDiffPayload::NodeAttr(node_id, attr_diff) => {
-                let Some(node) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
+                let Some(node) = self.get_node(*node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 node.kind.verify_diff(attr_diff).with_context(|| {
@@ -177,9 +195,13 @@ impl Workflow {
                 })?;
             }
             WorkflowDiffPayload::NodePos(node_id, ..) => {
-                let Some(_) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
-                    anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
-                };
+                anyhow::ensure!(
+                    self.get_node(*node_id).is_some(),
+                    "Cannot apply diff: node {node_id} does not exist"
+                );
+            }
+            WorkflowDiffPayload::Topology(change) => {
+                self.try_topology(change)?;
             }
         };
         Ok(())
@@ -189,7 +211,7 @@ impl Workflow {
     pub fn apply_diff(&mut self, diff: &WorkflowDiff) -> anyhow::Result<bool> {
         let need_render = match &diff.payload {
             WorkflowDiffPayload::NodeAttr(node_id, attr_diff) => {
-                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
+                let Some(node) = self.node_mut(*node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 node.kind.apply_diff(attr_diff).with_context(|| {
@@ -198,14 +220,273 @@ impl Workflow {
                 true
             }
             WorkflowDiffPayload::NodePos(node_id, new_pos) => {
-                let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
+                let Some(node) = self.node_mut(*node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
                 node.pos = *new_pos;
                 false
             }
+            WorkflowDiffPayload::Topology(change) => {
+                *self = self.try_topology(change)?;
+                true
+            }
         };
         Ok(need_render)
+    }
+
+    /// The single mutation path for topology edits.
+    /// It works on a clone, rebuilds the derived graph and returns the result.
+    fn try_topology(&self, change: &WorkflowTopoChange) -> anyhow::Result<Workflow> {
+        let mut copy = self.clone();
+        copy.apply_topology_in_place(*change)?;
+        copy.graph = WorkflowGraph::build(&copy.nodes)?;
+        Ok(copy)
+    }
+
+    fn apply_topology_in_place(&mut self, change: WorkflowTopoChange) -> anyhow::Result<()> {
+        match change {
+            WorkflowTopoChange::AddSerialNode { from, pos } => self.add_serial_node(from, pos),
+            WorkflowTopoChange::AddParreleNode {
+                from,
+                pos,
+                node_width,
+            } => self.add_parallel_node(from, pos, node_width),
+            WorkflowTopoChange::DeleteNode { id } => self.delete_node(id),
+            WorkflowTopoChange::AddEdge { from, to } => self.add_edge(from, to),
+            WorkflowTopoChange::DeleteEdge { from, to } => self.delete_edge(from, to),
+            WorkflowTopoChange::ReconnectEdge {
+                old_from,
+                old_to,
+                new_from,
+                new_to,
+            } => self.reconnect_edge(old_from, old_to, new_from, new_to),
+        }
+    }
+
+    fn add_serial_node(&mut self, from: NodeId, pos: (f32, f32)) -> anyhow::Result<()> {
+        let from_index = self
+            .graph
+            .index_of(from)
+            .with_context(|| format!("Cannot insert after node {from}: node does not exist"))?;
+        let successors = self.graph.successors(from_index).to_vec();
+        let new_id = self.allocator.alloc();
+
+        for successor in successors {
+            for source in self.nodes[successor].kind.sources_mut() {
+                if *source == Source::Node(from) {
+                    *source = Source::Node(new_id);
+                }
+            }
+        }
+        if self.output == Some(Source::Node(from)) {
+            self.output = Some(Source::Node(new_id));
+        }
+
+        self.nodes.push(Node {
+            node_id: new_id,
+            kind: NodeKind::default_normal(Some(Source::Node(from))),
+            pos,
+        });
+        Ok(())
+    }
+
+    fn add_parallel_node(
+        &mut self,
+        from: NodeId,
+        pos: (f32, f32),
+        node_width: f32,
+    ) -> anyhow::Result<()> {
+        let from_index = self.graph.index_of(from).with_context(|| {
+            format!("Cannot add a parallel node to {from}: node does not exist")
+        })?;
+        let (inherited, from_pos) = match &self.nodes[from_index].kind {
+            NodeKind::Normal { source, .. } => {
+                let Some(source) = source else {
+                    anyhow::bail!(
+                        "Cannot add a parallel node to {from}: node has no input to share"
+                    )
+                };
+                (*source, self.nodes[from_index].pos)
+            }
+            _ => anyhow::bail!(
+                "Cannot add a parallel node to {from}: only normal nodes have a single input to share"
+            ),
+        };
+        let successors = self.graph.successors(from_index).to_vec();
+        let new_id = self.allocator.alloc();
+
+        let existing_merge = match successors.as_slice() {
+            [successor] if matches!(self.nodes[*successor].kind, NodeKind::Merge { .. }) => {
+                Some(*successor)
+            }
+            _ => None,
+        };
+
+        if let Some(successor) = existing_merge {
+            let NodeKind::Merge { sources, .. } = &mut self.nodes[successor].kind else {
+                unreachable!("successor kind is checked above")
+            };
+            sources.push(Some(Source::Node(new_id)));
+        } else {
+            // A fan-out (or a plain successor) cannot take a second input, so
+            // merge both branches before they reach the old successors again.
+            let merge_id = self.allocator.alloc();
+            for successor in successors {
+                for source in self.nodes[successor].kind.sources_mut() {
+                    if *source == Source::Node(from) {
+                        *source = Source::Node(merge_id);
+                    }
+                }
+            }
+            if self.output == Some(Source::Node(from)) {
+                self.output = Some(Source::Node(merge_id));
+            }
+            self.nodes.push(Node {
+                node_id: merge_id,
+                kind: NodeKind::default_merge(vec![
+                    Some(Source::Node(from)),
+                    Some(Source::Node(new_id)),
+                ]),
+                pos: (
+                    (from_pos.0 + pos.0) / 2.0 + 1.2 * node_width,
+                    (from_pos.1 + pos.1) / 2.0,
+                ),
+            });
+        }
+
+        self.nodes.push(Node {
+            node_id: new_id,
+            kind: NodeKind::default_normal(Some(inherited)),
+            pos,
+        });
+        Ok(())
+    }
+
+    fn delete_node(&mut self, id: NodeId) -> anyhow::Result<()> {
+        let index = self
+            .graph
+            .index_of(id)
+            .with_context(|| format!("Cannot delete node {id}: node does not exist"))?;
+        // Only try to heal normal node
+        let heal = match &self.nodes[index].kind {
+            NodeKind::Normal { source, .. } => source.filter(|source| *source != Source::Node(id)),
+            _ => None,
+        };
+
+        for node in &mut self.nodes {
+            for slot in node.kind.source_slots_mut() {
+                if *slot == Some(Source::Node(id)) {
+                    *slot = heal;
+                }
+            }
+        }
+        if self.output == Some(Source::Node(id)) {
+            self.output = heal;
+        }
+
+        self.nodes.remove(index);
+        Ok(())
+    }
+
+    fn source_slot_mut(
+        &mut self,
+        to: NodeId,
+        port: usize,
+        allow_append: bool,
+    ) -> anyhow::Result<&mut Option<Source>> {
+        let Some(node) = self.node_mut(to) else {
+            anyhow::bail!("node {to} does not exist");
+        };
+        match &mut node.kind {
+            NodeKind::Normal { source, .. } => {
+                anyhow::ensure!(port == 0, "node {to} only has input port 0");
+                Ok(source)
+            }
+            NodeKind::Merge { sources, .. } => {
+                if port == sources.len() && allow_append {
+                    sources.push(None);
+                }
+                anyhow::ensure!(port < sources.len(), "node {to} has no input port {port}");
+                Ok(&mut sources[port])
+            }
+            NodeKind::Generator { .. } => anyhow::bail!("generator node {to} has no input port"),
+        }
+    }
+
+    fn add_edge(&mut self, from: NodeId, to: (NodeId, usize)) -> anyhow::Result<()> {
+        let (to_id, port) = to;
+        anyhow::ensure!(
+            self.graph.index_of(from).is_some(),
+            "Cannot connect edge: source node {from} does not exist"
+        );
+        let slot = self
+            .source_slot_mut(to_id, port, true)
+            .with_context(|| format!("Cannot connect edge to node {to_id} port {port}"))?;
+        *slot = Some(Source::Node(from));
+        Ok(())
+    }
+
+    fn delete_edge(&mut self, from: NodeId, to: (NodeId, usize)) -> anyhow::Result<()> {
+        let (to_id, port) = to;
+        let slot = self
+            .source_slot_mut(to_id, port, false)
+            .with_context(|| format!("Cannot disconnect edge from node {to_id} port {port}"))?;
+        anyhow::ensure!(
+            *slot == Some(Source::Node(from)),
+            "Cannot disconnect edge: edge from {from} to {to_id} port {port} does not exist"
+        );
+        *slot = None;
+        Ok(())
+    }
+
+    fn reconnect_edge(
+        &mut self,
+        old_from: NodeId,
+        old_to: (NodeId, usize),
+        new_from: NodeId,
+        new_to: (NodeId, usize),
+    ) -> anyhow::Result<()> {
+        if (old_from, old_to) == (new_from, new_to) {
+            return Ok(());
+        }
+        let (old_to_id, old_port) = old_to;
+        let (new_to_id, new_port) = new_to;
+
+        // Validate the whole diff before touching the graph.
+        {
+            let old_slot = self
+                .source_slot_mut(old_to_id, old_port, false)
+                .with_context(|| {
+                    format!("Cannot reconnect edge from node {old_to_id} port {old_port}")
+                })?;
+            anyhow::ensure!(
+                *old_slot == Some(Source::Node(old_from)),
+                "Cannot reconnect edge: edge from {old_from} to {old_to_id} port {old_port} does not exist"
+            );
+        }
+        anyhow::ensure!(
+            self.graph.index_of(new_from).is_some(),
+            "Cannot reconnect edge: source node {new_from} does not exist"
+        );
+
+        if old_to == new_to {
+            // Same port, new source: overwrite in place.
+            let slot = self.source_slot_mut(new_to_id, new_port, false)?;
+            *slot = Some(Source::Node(new_from));
+        } else {
+            let slot = self
+                .source_slot_mut(old_to_id, old_port, false)
+                .expect("old port was validated above");
+            *slot = None;
+
+            let slot = self
+                .source_slot_mut(new_to_id, new_port, true)
+                .with_context(|| {
+                    format!("Cannot reconnect edge to node {new_to_id} port {new_port}")
+                })?;
+            *slot = Some(Source::Node(new_from));
+        }
+        Ok(())
     }
 
     /// Check if workflow finish edit.
@@ -393,6 +674,7 @@ pub struct WorkflowDiff {
 pub enum WorkflowDiffPayload {
     NodeAttr(NodeId, NodeKindDiff),
     NodePos(NodeId, (f32, f32)),
+    Topology(WorkflowTopoChange),
 }
 
 #[derive(Clone, Copy)]
@@ -400,4 +682,51 @@ pub enum NodeKindDiff {
     Brightness(f32),
     Saturation(f32),
     BlendMode(BlendMode),
+}
+
+#[derive(Clone, Copy)]
+pub enum WorkflowTopoChange {
+    /// Insert node between current node and the successor of current node.
+    /// This will automatically connect edges.
+    /// Only Normal node is allowed
+    AddSerialNode {
+        from: NodeId,
+        pos: (f32, f32),
+    },
+    /// Insert node in parrele with current node.
+    /// e.g.
+    /// Before:
+    ///     A --> Current --> C
+    /// After:
+    ///     A --> Current --> C
+    ///       |->   New   ->|
+    /// This will automatically connect edges.
+    /// Only Normal node is allowed
+    AddParreleNode {
+        from: NodeId,
+        pos: (f32, f32),
+        node_width: f32,
+    },
+    DeleteNode {
+        id: NodeId,
+    },
+    /// Connect `from` to the input port `to.1` of node `to.0`.
+    /// A port is `(node, index)`: the same source may occupy several merge ports.
+    /// On a merge, `to.1 == source_count` appends a new port.
+    AddEdge {
+        from: NodeId,
+        to: (NodeId, usize),
+    },
+    /// Disconnect input port `to.1` of node `to.0`; it must currently read `from`.
+    DeleteEdge {
+        from: NodeId,
+        to: (NodeId, usize),
+    },
+    /// Move `old_from -> old_to` to `new_from -> new_to`, endpoints are `(node, port)`.
+    ReconnectEdge {
+        old_from: NodeId,
+        old_to: (NodeId, usize),
+        new_from: NodeId,
+        new_to: (NodeId, usize),
+    },
 }
