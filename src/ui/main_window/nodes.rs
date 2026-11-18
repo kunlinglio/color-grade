@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gpui_kit::base::StyledExt;
 use gpui_kit::*;
 
-use crate::project::{Node, NodeId, NodeKind, Source, WorkFlowDiff, WorkFlowDiffPayload};
+use crate::project::{Node, NodeId, NodeKind, Source, WorkflowDiff, WorkflowDiffPayload};
 use crate::ui::components::{Outline, ResizeSensitive, Text};
 use crate::ui::get_theme;
 use crate::ui::main_window::state::{self, EditState};
@@ -520,8 +520,8 @@ impl NodeCard {
             return;
         };
         self.drag = DragState::Empty;
-        let diff = WorkFlowDiff {
-            payload: WorkFlowDiffPayload::NodePos(self.id, self.pos),
+        let diff = WorkflowDiff {
+            payload: WorkflowDiffPayload::NodePos(self.id, self.pos),
         };
         if let Err(e) = self
             .edit_state

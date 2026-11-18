@@ -9,14 +9,14 @@ pub type NodeId = u64;
 
 /// The editable grade workflow, owned by the runtime's [`EditSession`].
 #[derive(Clone, Debug)]
-pub struct WorkFlow {
+pub struct Workflow {
     // We stored the connection relation ship inside th node,
     // so we do not need edge vector.
     nodes: Vec<Node>,
     output: Option<Source>,
     allocator: NodeIdAlloc,
     /// Derived DAG cache, the single source of truth is (nodes, output)
-    graph: WorkFlowGraph,
+    graph: WorkflowGraph,
 }
 
 #[derive(Clone, Debug)]
@@ -122,7 +122,7 @@ impl NodeKind {
     }
 }
 
-impl Default for WorkFlow {
+impl Default for Workflow {
     fn default() -> Self {
         let mut allocator = NodeIdAlloc::new();
         let node_id = allocator.alloc();
@@ -135,7 +135,7 @@ impl Default for WorkFlow {
             },
             pos: (1.0, 1.0), // TODO: Calculate more accurate default position
         }];
-        let graph = WorkFlowGraph::build(&nodes).expect("default workflow must be a DAG");
+        let graph = WorkflowGraph::build(&nodes).expect("default workflow must be a DAG");
         Self {
             nodes,
             output: Some(Source::Node(node_id)),
@@ -145,7 +145,7 @@ impl Default for WorkFlow {
     }
 }
 
-impl WorkFlow {
+impl Workflow {
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
@@ -158,7 +158,7 @@ impl WorkFlow {
         self.output
     }
 
-    pub(super) fn graph(&self) -> &WorkFlowGraph {
+    pub(super) fn graph(&self) -> &WorkflowGraph {
         &self.graph
     }
 
@@ -166,9 +166,9 @@ impl WorkFlow {
         Compiler::new(optimize).compile(self)
     }
 
-    pub fn verify_diff(&self, diff: &WorkFlowDiff) -> anyhow::Result<()> {
+    pub fn verify_diff(&self, diff: &WorkflowDiff) -> anyhow::Result<()> {
         match &diff.payload {
-            WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
+            WorkflowDiffPayload::NodeAttr(node_id, attr_diff) => {
                 let Some(node) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
@@ -176,7 +176,7 @@ impl WorkFlow {
                     format!("Cannot apply diff: diff does not match node {node_id} kind")
                 })?;
             }
-            WorkFlowDiffPayload::NodePos(node_id, ..) => {
+            WorkflowDiffPayload::NodePos(node_id, ..) => {
                 let Some(_) = self.nodes.iter().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
@@ -186,9 +186,9 @@ impl WorkFlow {
     }
 
     /// Return whether need to rerender or the diff is invalid
-    pub fn apply_diff(&mut self, diff: &WorkFlowDiff) -> anyhow::Result<bool> {
+    pub fn apply_diff(&mut self, diff: &WorkflowDiff) -> anyhow::Result<bool> {
         let need_render = match &diff.payload {
-            WorkFlowDiffPayload::NodeAttr(node_id, attr_diff) => {
+            WorkflowDiffPayload::NodeAttr(node_id, attr_diff) => {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
@@ -197,7 +197,7 @@ impl WorkFlow {
                 })?;
                 true
             }
-            WorkFlowDiffPayload::NodePos(node_id, new_pos) => {
+            WorkflowDiffPayload::NodePos(node_id, new_pos) => {
                 let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == *node_id) else {
                     anyhow::bail!("Cannot apply diff: node {node_id} does not exist");
                 };
@@ -233,7 +233,7 @@ impl WorkFlow {
 
 /// An owned DAG cache derived from `NodeKind` sources.
 #[derive(Clone, Debug)]
-pub(super) struct WorkFlowGraph {
+pub(super) struct WorkflowGraph {
     index_of: HashMap<NodeId, usize>,
     predecessors: Vec<Vec<usize>>,
     successors: Vec<Vec<usize>>,
@@ -242,7 +242,7 @@ pub(super) struct WorkFlowGraph {
     reachable: HashSet<usize>,
 }
 
-impl WorkFlowGraph {
+impl WorkflowGraph {
     /// Builds the derived DAG cache and validates the workflow.
     ///
     /// Must be called after every structural edit; value edits (params, position)
@@ -385,12 +385,12 @@ impl WorkFlowGraph {
 /// Store a diff for incremental update
 /// Only support update one node in a time
 #[derive(Clone, Copy)]
-pub struct WorkFlowDiff {
-    pub payload: WorkFlowDiffPayload,
+pub struct WorkflowDiff {
+    pub payload: WorkflowDiffPayload,
 }
 
 #[derive(Clone, Copy)]
-pub enum WorkFlowDiffPayload {
+pub enum WorkflowDiffPayload {
     NodeAttr(NodeId, NodeKindDiff),
     NodePos(NodeId, (f32, f32)),
 }

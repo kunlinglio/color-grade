@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::{Context, EntityId, EventEmitter};
 
 use crate::media::media_type::Media;
-use crate::project::{NodeId, SessionClient, WorkFlow, WorkFlowDiff, WorkFlowDiffPayload};
+use crate::project::{NodeId, SessionClient, Workflow, WorkflowDiff, WorkflowDiffPayload};
 
 /// A edit state shared by multiple panel inside mainwindow.
 /// Since they all need to edit on same data structure, so a unified
@@ -39,7 +39,7 @@ impl EditState {
             None
         }
     }
-    pub fn get_workflow(&self) -> Option<&WorkFlow> {
+    pub fn get_workflow(&self) -> Option<&Workflow> {
         if let EditState::Opened { client, .. } = self {
             Some(client.get_workflow())
         } else {
@@ -73,7 +73,7 @@ impl EditState {
     /// returns if the diff validate
     pub fn update(
         &mut self,
-        diff: WorkFlowDiff,
+        diff: WorkflowDiff,
         origin: EntityId,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
@@ -82,10 +82,10 @@ impl EditState {
             EditState::Opened { client, .. } => {
                 client.update_workflow(diff)?;
                 match diff.payload {
-                    WorkFlowDiffPayload::NodeAttr(node_id, ..) => {
+                    WorkflowDiffPayload::NodeAttr(node_id, ..) => {
                         cx.emit(NodeAttrChanged { node_id, origin });
                     }
-                    WorkFlowDiffPayload::NodePos(node_id, ..) => {
+                    WorkflowDiffPayload::NodePos(node_id, ..) => {
                         cx.emit(NodePosChanged { node_id, origin })
                     }
                 }

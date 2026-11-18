@@ -5,13 +5,13 @@ use futures::channel::mpsc;
 
 use crate::render::{Frame, Renderer};
 
-use super::{WorkFlow, WorkFlowDiff};
+use super::{Workflow, WorkflowDiff};
 
 /// A opened or edited media inside a project.
 pub(super) struct Session {
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     /// The ONLY SOURCE OF TRUTH of workflow
-    workflow: WorkFlow,
+    workflow: Workflow,
     decoded: Arc<Frame>,
 }
 
@@ -24,7 +24,7 @@ impl Session {
         let (width, height) = rgba.dimensions();
         let decoded_frame = Arc::new(Frame::new(width as usize, height as usize, rgba.to_vec()));
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
-        let workflow = WorkFlow::default();
+        let workflow = Workflow::default();
         let session = Session {
             cmd_rx,
             workflow: workflow.clone(),
@@ -73,15 +73,15 @@ pub struct SessionClient {
     ///
     /// Since this copy is held by main thread, cached it can significantly increase
     /// reaction speed.
-    workflow: WorkFlow,
+    workflow: Workflow,
 }
 
 impl SessionClient {
-    pub fn get_workflow(&self) -> &WorkFlow {
+    pub fn get_workflow(&self) -> &Workflow {
         &self.workflow
     }
 
-    pub fn update_workflow(&mut self, diff: WorkFlowDiff) -> anyhow::Result<()> {
+    pub fn update_workflow(&mut self, diff: WorkflowDiff) -> anyhow::Result<()> {
         self.workflow.verify_diff(&diff)?;
         let Ok(_) = self.cmd_tx.unbounded_send(Command::Update { diff }) else {
             anyhow::bail!("Failed to update workflow, because the Session has quit");
@@ -98,5 +98,5 @@ impl SessionClient {
 }
 
 enum Command {
-    Update { diff: WorkFlowDiff },
+    Update { diff: WorkflowDiff },
 }

@@ -3,7 +3,7 @@ use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
-use crate::project::{NodeKind, NodeKindDiff, WorkFlowDiff, WorkFlowDiffPayload};
+use crate::project::{NodeKind, NodeKindDiff, WorkflowDiff, WorkflowDiffPayload};
 use crate::ui::components::{Slider, Text};
 use crate::ui::main_window::{EditState, state};
 
@@ -38,8 +38,8 @@ impl Inspector {
                 let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
                     return;
                 };
-                let diff = WorkFlowDiff {
-                    payload: WorkFlowDiffPayload::NodeAttr(
+                let diff = WorkflowDiff {
+                    payload: WorkflowDiffPayload::NodeAttr(
                         node_id,
                         NodeKindDiff::Brightness(*value),
                     ),
@@ -58,8 +58,8 @@ impl Inspector {
                 let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
                     return;
                 };
-                let diff = WorkFlowDiff {
-                    payload: WorkFlowDiffPayload::NodeAttr(
+                let diff = WorkflowDiff {
+                    payload: WorkflowDiffPayload::NodeAttr(
                         node_id,
                         NodeKindDiff::Saturation(*value),
                     ),

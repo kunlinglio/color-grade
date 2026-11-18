@@ -3,7 +3,7 @@ use std::fmt;
 
 use anyhow::Context;
 
-use super::{NodeKind, Source, WorkFlow};
+use super::{NodeKind, Source, Workflow};
 use crate::render::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 
 pub(super) struct Compiler {
@@ -15,7 +15,7 @@ impl Compiler {
         Self { optimize }
     }
 
-    pub(super) fn compile(&self, workflow: &WorkFlow) -> anyhow::Result<RenderList> {
+    pub(super) fn compile(&self, workflow: &Workflow) -> anyhow::Result<RenderList> {
         // Stage 1: Validate workflow
         let Some(useful_nodes) = workflow.prepare_compile() else {
             // not finished, give up compiling
@@ -441,14 +441,14 @@ impl fmt::Display for IR {
 }
 
 struct Lowerer<'workflow> {
-    workflow: &'workflow WorkFlow,
+    workflow: &'workflow Workflow,
     ir: IR,
     outputs: HashMap<usize, ValueId>,
     useful_nodes: HashSet<usize>,
 }
 
 impl<'workflow> Lowerer<'workflow> {
-    fn new(workflow: &'workflow WorkFlow, useful_nodes: HashSet<usize>) -> Self {
+    fn new(workflow: &'workflow Workflow, useful_nodes: HashSet<usize>) -> Self {
         Self {
             workflow,
             ir: IR::new(),
