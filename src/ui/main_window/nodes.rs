@@ -56,15 +56,17 @@ impl Nodes {
                 };
                 if let Some(previous) = previous {
                     if let Some(card) = node_cards.get(previous) {
-                        card.update(cx, |this, _cx| {
+                        card.update(cx, |this, cx| {
                             this.selected = false;
+                            cx.notify();
                         })
                     }
                 }
                 if let Some(current) = current {
                     if let Some(card) = node_cards.get(current) {
-                        card.update(cx, |this, _cx| {
+                        card.update(cx, |this, cx| {
                             this.selected = true;
+                            cx.notify();
                         })
                     }
                 }
@@ -485,33 +487,12 @@ impl NodeCard {
         );
         let size = self.nodes_size.borrow();
         // Clamp node pos inside bounds
-        let pos = {
-            // bounds to pos
-            let x_bounds = (
-                0. + NODES_PADDING,
-                (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING),
-            );
-            let y_bounds = (
-                0. + NODES_PADDING,
-                (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING),
-            );
-            let anchor = (size.0 / 2., size.1 / 2.);
-            let (dx, dy) = (target_pos.0 - anchor.0, target_pos.1 - anchor.1);
-            let mut t = 1.0f32;
-            if dx > 0.0 {
-                t = t.min((x_bounds.1 - anchor.0) / dx);
-            } else if dx < 0.0 {
-                t = t.min((x_bounds.0 - anchor.0) / dx);
-            }
-            if dy > 0.0 {
-                t = t.min((y_bounds.1 - anchor.1) / dy);
-            } else if dy < 0.0 {
-                t = t.min((y_bounds.0 - anchor.1) / dy);
-            }
-            let t = t.clamp(0.0, 1.0);
-            (anchor.0 + dx * t, anchor.1 + dy * t)
-        };
-        self.pos = pos;
+        let max_x = (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING);
+        let max_y = (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING);
+        self.pos = (
+            target_pos.0.clamp(NODES_PADDING, max_x),
+            target_pos.1.clamp(NODES_PADDING, max_y),
+        );
         cx.notify();
     }
 
@@ -520,6 +501,9 @@ impl NodeCard {
             return;
         };
         self.drag = DragState::Empty;
+        if self.pos == start_pos {
+            return;
+        }
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::NodePos(self.id, self.pos),
         };
