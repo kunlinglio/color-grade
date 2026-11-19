@@ -562,7 +562,30 @@ impl<'workflow> Lowerer<'workflow> {
                     current
                 }
                 MergeNodeKind::Mixer => {
-                    todo!()
+                    let branches: Vec<Source> = sources.iter().flatten().copied().collect();
+                    anyhow::ensure!(branches.len() >= 2, "mixer node needs at least 2 inputs");
+
+                    // Each branch contributes only its own change, measured against the
+                    // point the branches diverge at.
+                    let base = match self.workflow.graph().nearest_common_ancestor(&branches)? {
+                        None => self.ir.input,
+                        Some(index) => {
+                            let node_id = self.workflow.nodes()[index].node_id;
+                            self.value_of(Source::Node(node_id))
+                        }
+                    };
+                    let branches: Vec<ValueId> = branches
+                        .iter()
+                        .map(|source| self.value_of(*source))
+                        .collect();
+
+                    let output = self.ir.new_value();
+                    self.ir.push(IRInstruction::Mix {
+                        branches,
+                        base,
+                        to: output,
+                    });
+                    output
                 }
             },
             NodeKind::Generator { .. } => {

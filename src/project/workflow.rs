@@ -531,6 +531,9 @@ pub(super) struct WorkflowGraph {
     topological_order: Vec<usize>,
     /// Stores nodes whose input is satisfied and reachable from graph's inputs
     reachable: HashSet<usize>,
+    /// Nodes reading directly from the workflow input. The input is not a node,
+    /// so its edges are not part of `predecessors`; they are recorded here.
+    reads_input: Vec<bool>,
 }
 
 impl WorkflowGraph {
@@ -552,9 +555,13 @@ impl WorkflowGraph {
         // build predecessors and successors
         let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
         let mut successors: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+        let mut reads_input = vec![false; nodes.len()];
         for (to, node) in nodes.iter().enumerate() {
             let mut add_source = |source: Source| -> anyhow::Result<()> {
                 let Source::Node(source_id) = source else {
+                    // `Source::Input` is an edge as well, it just has no node on
+                    // the source side, so it cannot live in `predecessors`.
+                    reads_input[to] = true;
                     return Ok(());
                 };
                 let from = index_of.get(&source_id).copied().ok_or_else(|| {
@@ -636,6 +643,7 @@ impl WorkflowGraph {
             successors,
             topological_order: order,
             reachable,
+            reads_input,
         })
     }
 
@@ -656,12 +664,87 @@ impl WorkflowGraph {
         ancestors
     }
 
-    pub(super) fn topological_order(&self) -> &[usize] {
-        &self.topological_order
+    /// Ancestors of the node at `index`, including the node itself.
+    /// Returns (Ancestor node indexes, input is ancestor)
+    fn ancestors_of_index(&self, index: usize) -> (HashSet<usize>, bool) {
+        let ancestors: HashSet<usize> = self.ancestors_of(index);
+        let include_input = ancestors.iter().any(|&index| self.reads_input[index]);
+        (ancestors, include_input)
     }
 
-    pub(super) fn predecessors(&self, index: usize) -> &[usize] {
-        &self.predecessors[index]
+    /// Ancestors of `source`, including the source itself.
+    /// Returns (Ancestor node indexes, input is ancestor)
+    pub(super) fn ancestors_of_source(&self, source: Source) -> (HashSet<usize>, bool) {
+        match source {
+            Source::Input => (HashSet::new(), true),
+            Source::Node(id) => {
+                let index = self.index_of(id).expect("Source node must exist");
+                self.ancestors_of_index(index)
+            }
+        }
+    }
+
+    /// Nearest common ancestor of `branches`, used to pick the base of a mixer.
+    ///
+    /// Returns `Ok(None)` when the workflow input is the nearest common ancestor.
+    /// The nearest common ancestor is a common ancestor that is not a strict
+    /// ancestor of any other common ancestor. It is unique for tree-like
+    /// workflows; ambiguous topologies are reported as an error.
+    pub(super) fn nearest_common_ancestor(
+        &self,
+        branches: &[Source],
+    ) -> anyhow::Result<Option<usize>> {
+        let mut sources = branches.iter();
+        let Some(first) = sources.next() else {
+            anyhow::bail!("cannot find the ancestor of nothing");
+        };
+
+        let (mut common, mut input_common) = self.ancestors_of_source(*first);
+        for branch in sources {
+            let (ancestors, branch_reads_input) = self.ancestors_of_source(*branch);
+            common.retain(|ancestor| ancestors.contains(ancestor));
+            input_common &= branch_reads_input;
+        }
+        anyhow::ensure!(
+            !common.is_empty() || input_common,
+            "branches have no common ancestor"
+        );
+
+        let candidates: Vec<usize> = common.into_iter().collect();
+        // Each candidate's own ancestors, including itself.
+        let ancestor_sets: Vec<HashSet<usize>> = candidates
+            .iter()
+            .map(|&index| self.ancestors_of_index(index).0)
+            .collect();
+        // A common ancestor is "nearest" when it is not a strict ancestor of
+        // another common ancestor; that leaves the deepest nodes of the
+        // common ancestor set.
+        let mut nearest: Vec<usize> = Vec::new();
+        for (index, &candidate) in candidates.iter().enumerate() {
+            let mut is_ancestor_of_other = false;
+            for (other, ancestors) in ancestor_sets.iter().enumerate() {
+                if other != index && ancestors.contains(&candidate) {
+                    is_ancestor_of_other = true;
+                    break;
+                }
+            }
+            if !is_ancestor_of_other {
+                nearest.push(candidate);
+            }
+        }
+
+        match nearest.as_slice() {
+            // Only the workflow input is common to every branch.
+            [] => Ok(None),
+            [ancestor] => Ok(Some(*ancestor)),
+            _ => {
+                anyhow::bail!("branches have multiple nearest common ancestors: {nearest:?}")
+            }
+        }
+    }
+
+    pub(super) fn topological_order(&self) -> &[usize] {
+        &self.topological_order
     }
 
     pub(super) fn successors(&self, index: usize) -> &[usize] {
