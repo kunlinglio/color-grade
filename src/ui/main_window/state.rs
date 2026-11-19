@@ -148,7 +148,6 @@ pub struct NodePosChanged {
     pub node_id: NodeId,
 }
 
-/// TODO: Support topo change
 pub struct WorkflowTopoChanged {
     pub origin: EntityId,
 }

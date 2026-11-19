@@ -132,7 +132,7 @@ impl ProjectRuntimeThread {
     pub fn quit(self) {
         let _ = self.quit_sender.send(());
         if let Err(_) = self.handler.join() {
-            error!("ProjectRuntime thread panicked during shutdown!")
+            error!("ProjectRuntime thread panicked!")
         }
     }
 }

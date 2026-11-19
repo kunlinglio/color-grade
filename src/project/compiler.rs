@@ -490,19 +490,17 @@ impl<'workflow> Lowerer<'workflow> {
                 }
                 current
             }
-            NodeKind::Merge {
-                sources,
-                blend_mode,
-            } => {
-                let mut sources = sources.iter().flatten().copied();
-                let mut current = self.value_of(sources.next().expect("Merge must have inputs"));
-                for source in sources {
-                    let foreground = self.value_of(source);
-                    current = self
-                        .ir
-                        .push(IROperation::Merge(*blend_mode), vec![foreground, current]);
-                }
-                current
+            NodeKind::Merge { .. } => {
+                todo!("Merge nodes are not supported by the compiler yet")
+                // let mut sources = sources.iter().flatten().copied();
+                // let mut current = self.value_of(sources.next().expect("Merge must have inputs"));
+                // for source in sources {
+                //     let foreground = self.value_of(source);
+                //     current = self
+                //         .ir
+                //         .push(IROperation::Merge(*blend_mode), vec![foreground, current]);
+                // }
+                // current
             }
             NodeKind::Generator { .. } => {
                 todo!("Implement generator's lower")

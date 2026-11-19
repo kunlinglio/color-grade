@@ -2,15 +2,20 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt;
 use gpui_kit::*;
 
-use crate::project::{Node, NodeId, NodeKind, Source, WorkflowDiff, WorkflowDiffPayload};
-use crate::ui::components::{Outline, ResizeSensitive, Text};
+use crate::project::{
+    Node, NodeId, NodeKind, Source, WorkflowDiff, WorkflowDiffPayload, WorkflowTopoChange,
+};
+use crate::ui::components::{Icon, Outline, ResizeSensitive, Text};
 use crate::ui::get_theme;
 use crate::ui::main_window::state::{self, EditState};
 
 const NODES_PADDING: f32 = 16.;
+const NODE_ADD_GAP: f32 = 32.;
+const NODE_ACTIONS_GROUP: &str = "node-actions";
 
 pub struct Nodes {
     edit_state: Entity<EditState>,
@@ -88,8 +93,13 @@ impl Nodes {
         .detach();
         cx.subscribe(
             &edit_state,
-            |_this, _edit_state, _event: &state::WorkflowTopoChanged, _cx| {
-                todo!("Implement workflow topology change")
+            |this, _edit_state, event: &state::WorkflowTopoChanged, cx| {
+                assert_eq!(
+                    cx.entity_id(),
+                    event.origin,
+                    "The workflow topology should only be changed by nodes"
+                );
+                this.sync(cx);
             },
         )
         .detach();
@@ -495,14 +505,7 @@ impl NodeCard {
             start_pos.0 + f32::from(cur_cursor.x - start_cursor.x),
             start_pos.1 + f32::from(cur_cursor.y - start_cursor.y),
         );
-        let size = self.nodes_size.borrow();
-        // Clamp node pos inside bounds
-        let max_x = (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING);
-        let max_y = (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING);
-        self.pos = (
-            target_pos.0.clamp(NODES_PADDING, max_x),
-            target_pos.1.clamp(NODES_PADDING, max_y),
-        );
+        self.pos = self.clamp_pos(target_pos);
         if let Some(hud) = &mut self.pos_hud.upgrade() {
             hud.update(cx, |this, cx| {
                 this.update(
@@ -515,6 +518,49 @@ impl NodeCard {
             })
         }
         cx.notify();
+    }
+
+    fn clamp_pos(&self, target: (f32, f32)) -> (f32, f32) {
+        let size = self.nodes_size.borrow();
+        let max_x = (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING);
+        let max_y = (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING);
+        (
+            target.0.clamp(NODES_PADDING, max_x),
+            target.1.clamp(NODES_PADDING, max_y),
+        )
+    }
+
+    fn add_serial_node(&mut self, cx: &mut Context<Self>) {
+        let pos = self.clamp_pos((self.pos.0 + NODE_WIDTH + NODE_ADD_GAP, self.pos.1));
+        let diff = WorkflowDiff {
+            payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddSerialNode {
+                from: self.id,
+                pos,
+            }),
+        };
+        if let Err(error) = self
+            .edit_state
+            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
+        {
+            warn!("Failed to add serial node: {error:#}");
+        }
+    }
+
+    fn add_parallel_node(&mut self, cx: &mut Context<Self>) {
+        let pos = self.clamp_pos((self.pos.0, self.pos.1 + NODE_HEIGHT + NODE_ADD_GAP));
+        let diff = WorkflowDiff {
+            payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddParreleNode {
+                from: self.id,
+                pos,
+                node_width: NODE_WIDTH,
+            }),
+        };
+        if let Err(error) = self
+            .edit_state
+            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
+        {
+            warn!("Failed to add parallel node: {error:#}");
+        }
     }
 
     fn drag_finish(&mut self, cx: &mut Context<Self>) {
@@ -569,6 +615,7 @@ impl Render for NodeCard {
         let theme = get_theme(cx);
         let element = div()
             .id(format!("node-card-{}", self.id))
+            .group(NODE_ACTIONS_GROUP)
             .absolute()
             .left(px(self.pos.0))
             .top(px(self.pos.1))
@@ -617,7 +664,53 @@ impl Render for NodeCard {
         } else {
             element
         };
-        element.child(Text::new("Nodes").content())
+        let add_button = |id: SharedString| {
+            div()
+                .id(id)
+                .absolute()
+                .size(px(20.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(theme.colors.background.elevated)
+                .border_1()
+                .border_color(theme.colors.border.subtle)
+                .invisible()
+                .group_hover(NODE_ACTIONS_GROUP, |style| style.visible())
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .child(
+                    Icon::new(IconName::CirclePlus)
+                        .size(px(16.0))
+                        .text_color(theme.colors.text.primary),
+                )
+        };
+        let add_serial = add_button(format!("add-serial-{}", self.id).into())
+            .right(px(-10.0))
+            .top(px(NODE_HEIGHT / 2.0 - 10.0))
+            .on_click(cx.listener(|this, _event, _window, cx| {
+                cx.stop_propagation();
+                this.add_serial_node(cx);
+            }));
+        let element = element
+            .child(Text::new("Nodes").content())
+            .child(add_serial);
+        if matches!(&self.kind, NodeCardKind::Normal {}) {
+            element.child(
+                add_button(format!("add-parallel-{}", self.id).into())
+                    .bottom(px(-10.0))
+                    .left(px(NODE_WIDTH / 2.0 - 10.0))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        cx.stop_propagation();
+                        this.add_parallel_node(cx);
+                    })),
+            )
+        } else {
+            element
+        }
     }
 }
 

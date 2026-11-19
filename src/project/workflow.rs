@@ -69,10 +69,24 @@ pub enum NodeKind {
         /// `None` is an unconnected slot: it is ignored when compiling, but a Merge
         /// needs at least two connected inputs to be considered finished.
         sources: Vec<Option<Source>>,
-        blend_mode: BlendMode,
+        kind: MergeNodeKind,
     },
     /// A generator node with 0 input and 1 output
     Generator { mode: GeneratorMode },
+}
+
+#[derive(Clone, Debug)]
+pub enum MergeNodeKind {
+    /// Normal layer blend, just like ps.
+    LayerBlend(BlendMode),
+    /// Layer mixer, mix all changes from different diverse directly.
+    Mixer,
+}
+
+impl Default for MergeNodeKind {
+    fn default() -> Self {
+        Self::Mixer
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -91,7 +105,7 @@ impl NodeKind {
     fn default_merge(sources: Vec<Option<Source>>) -> Self {
         Self::Merge {
             sources,
-            blend_mode: BlendMode::Top,
+            kind: MergeNodeKind::default(),
         }
     }
     /// Return if diff legal
@@ -103,9 +117,6 @@ impl NodeKind {
             (NodeKind::Normal { saturation, .. }, NodeKindDiff::Saturation(new)) => {
                 *saturation = *new;
             }
-            (NodeKind::Merge { blend_mode, .. }, NodeKindDiff::BlendMode(new)) => {
-                *blend_mode = *new;
-            }
             _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
         Ok(())
@@ -115,7 +126,6 @@ impl NodeKind {
         match (self, diff) {
             (NodeKind::Normal { .. }, NodeKindDiff::Brightness(..)) => {}
             (NodeKind::Normal { .. }, NodeKindDiff::Saturation(..)) => {}
-            (NodeKind::Merge { .. }, NodeKindDiff::BlendMode(..)) => {}
             _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
         Ok(())
@@ -681,7 +691,6 @@ pub enum WorkflowDiffPayload {
 pub enum NodeKindDiff {
     Brightness(f32),
     Saturation(f32),
-    BlendMode(BlendMode),
 }
 
 #[derive(Clone, Copy)]
