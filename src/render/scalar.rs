@@ -67,6 +67,17 @@ impl ScalarBackend {
                     let value = kernel::merge(foreground, background, *mode)?;
                     write_slot(&mut slots, *to, value, op_index)?;
                 }
+                Op::Mix { base, from, to } => {
+                    let base = read_slot(&slots, *base, op_index, "base")?;
+                    let branches = from
+                        .iter()
+                        .map(|slot| read_slot(&slots, *slot, op_index, "from"))
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+
+                    let value = kernel::mix(base, &branches)?;
+
+                    write_slot(&mut slots, *to, value, op_index)?;
+                }
             }
         }
 
@@ -228,6 +239,45 @@ mod kernel {
                 }
             }
         }
+    }
+
+    pub(super) fn mix(
+        base: &ScalarFrame,
+        branches: &[&ScalarFrame],
+    ) -> anyhow::Result<ScalarFrame> {
+        anyhow::ensure!(branches.len() >= 2, "Mix requires at least two branches");
+
+        for branch in branches {
+            anyhow::ensure!(
+                branch.width == base.width && branch.height == base.height,
+                "cannot mix frames of different sizes: \
+             base is {}x{}, branch is {}x{}",
+                base.width,
+                base.height,
+                branch.width,
+                branch.height,
+            );
+        }
+
+        let mut output = base.clone();
+
+        for branch in branches {
+            for ((output_px, base_px), branch_px) in output
+                .rgba
+                .chunks_exact_mut(4)
+                .zip(base.rgba.chunks_exact(4))
+                .zip(branch.rgba.chunks_exact(4))
+            {
+                output_px[0] += branch_px[0] - base_px[0];
+                output_px[1] += branch_px[1] - base_px[1];
+                output_px[2] += branch_px[2] - base_px[2];
+
+                // TODO: Support mix alpha channel
+                output_px[3] = base_px[3];
+            }
+        }
+
+        Ok(output)
     }
 
     /// Composite `foreground` over `background` using `mode`

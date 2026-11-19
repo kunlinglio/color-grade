@@ -56,6 +56,11 @@ pub enum Op {
         to: Slot,
         mode: BlendMode,
     },
+    Mix {
+        base: Slot,
+        from: Vec<Slot>,
+        to: Slot,
+    },
 }
 
 impl RenderList {
@@ -92,6 +97,13 @@ impl RenderList {
             Op::Merge { fg, bg, to, .. } => {
                 self.check_slot(fg, "fg")?;
                 self.check_slot(bg, "bg")?;
+                self.check_slot(to, "to")?;
+            }
+            Op::Mix { base, from, to } => {
+                self.check_slot(base, "base")?;
+                for (index, slot) in from.iter().enumerate() {
+                    self.check_slot(slot, &format!("from: %{index}"))?;
+                }
                 self.check_slot(to, "to")?;
             }
         }
