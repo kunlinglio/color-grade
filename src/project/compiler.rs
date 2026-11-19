@@ -4,6 +4,7 @@ use std::fmt;
 use anyhow::Context;
 
 use super::{NodeKind, Source, Workflow};
+use crate::project::workflow::MergeNodeKind;
 use crate::render::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 
 pub(super) struct Compiler {
@@ -79,16 +80,20 @@ impl PointwiseFusing {
                 let Some(instruction) = self.ir.instructions[instruction_id.0].as_ref() else {
                     continue;
                 };
-                let IROperation::Pointwise(_) = &instruction.operation else {
+                let IRInstruction::Pointwise { from, .. } = instruction else {
                     // cannot fuse non-pointwise instructions
                     continue;
                 };
-                assert!(
-                    instruction.inputs.len() == 1,
-                    "pointwise instruction is not unary"
-                );
-                let input = instruction.inputs[0];
-                let Some(pre_instruction_id) = def_use.values[input.0].producer else {
+                if *from == self.ir.output {
+                    // The producer defines the observable return value and cannot be removed.
+                    // This indicates that current instruction is just a dead code.
+                    continue;
+                }
+                if def_use.values[from.0].consumer.len() != 1 {
+                    // Other consumers still need the producer's output.
+                    continue;
+                }
+                let Some(pre_instruction_id) = def_use.values[from.0].producer else {
                     // instruction's input comes from "input"
                     continue;
                 };
@@ -96,19 +101,10 @@ impl PointwiseFusing {
                 else {
                     continue;
                 };
-                let IROperation::Pointwise(_) = &pre_instruction.operation else {
+                let IRInstruction::Pointwise { .. } = pre_instruction else {
                     // previous instruction is not pointwise
                     continue;
                 };
-                if input == self.ir.output {
-                    // The producer defines the observable return value and cannot be removed.
-                    // This indicates that current instruction is just a dead code.
-                    continue;
-                }
-                if def_use.values[input.0].consumer.len() != 1 {
-                    // Other consumers still need the producer's output.
-                    continue;
-                }
                 pre_instruction_id
             };
 
@@ -120,18 +116,29 @@ impl PointwiseFusing {
                 .take()
                 .expect("producer must be active");
 
-            let (operations, inputs) = match (previous.operation, current.operation) {
-                (IROperation::Pointwise(mut previous_ops), IROperation::Pointwise(current_ops)) => {
+            let (operations, from, to) = match (previous, current) {
+                (
+                    IRInstruction::Pointwise {
+                        ops: mut previous_ops,
+                        from: previous_from,
+                        ..
+                    },
+                    IRInstruction::Pointwise {
+                        ops: current_ops,
+                        to: current_to,
+                        ..
+                    },
+                ) => {
                     previous_ops.extend(current_ops);
-                    (previous_ops, previous.inputs)
+                    (previous_ops, previous_from, current_to)
                 }
                 _ => unreachable!("both instructions were checked to be pointwise"),
             };
 
-            self.ir.instructions[instruction_id.0] = Some(IRInstruction {
-                operation: IROperation::Pointwise(operations),
-                inputs,
-                output: current.output,
+            self.ir.instructions[instruction_id.0] = Some(IRInstruction::Pointwise {
+                ops: operations,
+                from,
+                to,
             });
             // Rebuild def-use because ir has changed
             // TODO: Optimize this rebuild
@@ -149,17 +156,50 @@ struct ValueId(usize);
 struct InstructionId(usize);
 
 #[derive(Debug, Clone)]
-struct IRInstruction {
-    operation: IROperation,
-    inputs: Vec<ValueId>,
-    output: ValueId,
+enum IRInstruction {
+    Pointwise {
+        ops: Vec<PointwiseOp>,
+        from: ValueId,
+        to: ValueId,
+    },
+    Merge {
+        bg: ValueId,
+        fg: ValueId,
+        to: ValueId,
+        mode: BlendMode,
+    },
+    Mix {
+        branches: Vec<ValueId>,
+        base: ValueId,
+        to: ValueId,
+    },
 }
 
-/// TODO: use type system to avoid check operands len, see [`Op`]
-#[derive(Debug, Clone)]
-enum IROperation {
-    Pointwise(Vec<PointwiseOp>),
-    Merge(BlendMode),
+impl IRInstruction {
+    fn inputs(&self) -> Vec<ValueId> {
+        match self {
+            IRInstruction::Merge { bg, fg, .. } => vec![*bg, *fg],
+            IRInstruction::Mix { branches, base, .. } => {
+                let mut inputs = branches.clone();
+                inputs.push(*base);
+                inputs
+            }
+            IRInstruction::Pointwise { from, .. } => {
+                vec![*from]
+            }
+        }
+    }
+    fn outputs(&self) -> Vec<ValueId> {
+        match self {
+            IRInstruction::Merge { to, .. } => vec![*to],
+            IRInstruction::Mix { to, .. } => {
+                vec![*to]
+            }
+            IRInstruction::Pointwise { to, .. } => {
+                vec![*to]
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -170,6 +210,7 @@ struct IRDefUseEntry {
 
 /// Def use analysis for IR
 struct IRDefUse {
+    /// ValueId -> Entry
     values: Vec<IRDefUseEntry>,
 }
 
@@ -189,19 +230,21 @@ impl IRDefUse {
                 continue;
             };
             let id = InstructionId(index);
-            let output = instruction.output.0;
-            anyhow::ensure!(
-                output < ir.max_value_id,
-                "Defined value %{} out of bound {}",
-                output,
-                ir.max_value_id
-            );
-            anyhow::ensure!(
-                values[output].producer.is_none() && output != ir.input.0,
-                "Assign to value %{} multiple times",
-                output
-            );
-            values[output].producer = Some(id);
+            for output in instruction.outputs() {
+                let output = output.0;
+                anyhow::ensure!(
+                    output < ir.max_value_id,
+                    "Defined value %{} out of bound {}",
+                    output,
+                    ir.max_value_id
+                );
+                anyhow::ensure!(
+                    values[output].producer.is_none() && output != ir.input.0,
+                    "Assign to value %{} multiple times",
+                    output
+                );
+                values[output].producer = Some(id);
+            }
         }
 
         for (index, instruction) in ir.instructions.iter().enumerate() {
@@ -209,7 +252,7 @@ impl IRDefUse {
                 continue;
             };
             let id = InstructionId(index);
-            for &input in &instruction.inputs {
+            for &input in &instruction.inputs() {
                 anyhow::ensure!(
                     input.0 < ir.max_value_id,
                     "Use value %{} out of bound {}",
@@ -246,7 +289,7 @@ impl IRDefUse {
             let instruction = ir.instructions[producer.0]
                 .as_ref()
                 .context("Value producer is not active")?;
-            values.extend(instruction.inputs.iter().copied());
+            values.extend(instruction.inputs().iter().copied());
         }
         Ok(live)
     }
@@ -274,15 +317,14 @@ impl IR {
         }
     }
 
-    fn push(&mut self, operation: IROperation, inputs: Vec<ValueId>) -> ValueId {
+    fn new_value(&mut self) -> ValueId {
         let output = ValueId(self.max_value_id);
         self.max_value_id += 1;
-        self.instructions.push(Some(IRInstruction {
-            operation,
-            inputs,
-            output,
-        }));
         output
+    }
+
+    fn push(&mut self, instruction: IRInstruction) {
+        self.instructions.push(Some(instruction));
     }
 
     fn verify(self) -> anyhow::Result<IR> {
@@ -296,7 +338,7 @@ impl IR {
             self.instructions
                 .iter()
                 .flatten()
-                .any(|i| i.output == self.output)
+                .any(|i| i.outputs().iter().any(|output| *output == self.output))
                 || self.output == self.input,
             "IR output %{} is not produced by any instruction or input",
             self.output.0
@@ -308,19 +350,15 @@ impl IR {
             let Some(instruction) = instruction else {
                 continue;
             };
-            match &instruction.operation {
-                IROperation::Pointwise(ops) => {
-                    anyhow::ensure!(
-                        instruction.inputs.len() == 1,
-                        "pointwise #{index} is not unary"
-                    );
+            match instruction {
+                IRInstruction::Pointwise { ops, .. } => {
                     anyhow::ensure!(!ops.is_empty(), "pointwise #{index} has no operations");
                 }
-                IROperation::Merge(_) => {
-                    anyhow::ensure!(
-                        instruction.inputs.len() == 2,
-                        "merge #{index} is not binary"
-                    );
+                IRInstruction::Merge { .. } => {
+                    // Pass: Nothing to verify
+                }
+                IRInstruction::Mix { branches, .. } => {
+                    anyhow::ensure!(branches.len() >= 2, "mix # {index} has less than 2 layers");
                 }
             }
         }
@@ -359,7 +397,7 @@ impl IR {
             };
             active_count += 1;
             let mut producers = HashSet::new();
-            for input in &instruction.inputs {
+            for input in &instruction.inputs() {
                 if let Some(producer) = def_use.values[input.0].producer {
                     producers.insert(producer);
                 }
@@ -381,11 +419,12 @@ impl IR {
             let instruction = self.instructions[instruction_id.0]
                 .as_ref()
                 .expect("scheduled instruction must be active");
-            let output = instruction.output;
-            for &consumer in &def_use.values[output.0].consumer {
-                indegree[consumer.0] -= 1;
-                if indegree[consumer.0] == 0 {
-                    ready.push(consumer);
+            for output in instruction.outputs() {
+                for &consumer in &def_use.values[output.0].consumer {
+                    indegree[consumer.0] -= 1;
+                    if indegree[consumer.0] == 0 {
+                        ready.push(consumer);
+                    }
                 }
             }
         }
@@ -400,11 +439,16 @@ impl fmt::Display for IR {
         writeln!(f, "ir(%{}) {{", self.input.0)?;
 
         for instruction in self.instructions.iter().flatten() {
-            write!(f, "  %{} = ", instruction.output.0)?;
-            match &instruction.operation {
-                IROperation::Pointwise(operations) => {
+            assert_eq!(
+                instruction.outputs().len(),
+                1,
+                "Can only print Instruction with one output"
+            );
+            write!(f, "  %{} = ", instruction.outputs()[0].0)?;
+            match instruction {
+                IRInstruction::Pointwise { ops, .. } => {
                     write!(f, "pointwise [")?;
-                    for (operation_index, operation) in operations.iter().enumerate() {
+                    for (operation_index, operation) in ops.iter().enumerate() {
                         if operation_index != 0 {
                             write!(f, ", ")?;
                         }
@@ -419,12 +463,15 @@ impl fmt::Display for IR {
                     }
                     write!(f, "]")?;
                 }
-                IROperation::Merge(mode) => match mode {
+                IRInstruction::Merge { mode, .. } => match mode {
                     BlendMode::Top => write!(f, "merge.top")?,
                 },
+                IRInstruction::Mix { base, .. } => {
+                    write!(f, "mix (based on %{})", base.0)?;
+                }
             }
 
-            for (input_index, input) in instruction.inputs.iter().enumerate() {
+            for (input_index, input) in instruction.inputs().iter().enumerate() {
                 if input_index == 0 {
                     write!(f, " ")?;
                 } else {
@@ -477,31 +524,47 @@ impl<'workflow> Lowerer<'workflow> {
             } => {
                 let mut current = self.value_of(source.expect("Normal source must be reachable"));
                 if *brightness != 1.0 {
-                    current = self.ir.push(
-                        IROperation::Pointwise(vec![PointwiseOp::Brightness(*brightness)]),
-                        vec![current],
-                    );
+                    let output = self.ir.new_value();
+                    self.ir.push(IRInstruction::Pointwise {
+                        ops: vec![PointwiseOp::Brightness(*brightness)],
+                        from: current,
+                        to: output,
+                    });
+                    current = output;
                 }
                 if *saturation != 1.0 {
-                    current = self.ir.push(
-                        IROperation::Pointwise(vec![PointwiseOp::Saturation(*saturation)]),
-                        vec![current],
-                    );
+                    let output = self.ir.new_value();
+                    self.ir.push(IRInstruction::Pointwise {
+                        ops: vec![PointwiseOp::Saturation(*saturation)],
+                        from: current,
+                        to: output,
+                    });
+                    current = output;
                 }
                 current
             }
-            NodeKind::Merge { .. } => {
-                todo!("Merge nodes are not supported by the compiler yet")
-                // let mut sources = sources.iter().flatten().copied();
-                // let mut current = self.value_of(sources.next().expect("Merge must have inputs"));
-                // for source in sources {
-                //     let foreground = self.value_of(source);
-                //     current = self
-                //         .ir
-                //         .push(IROperation::Merge(*blend_mode), vec![foreground, current]);
-                // }
-                // current
-            }
+            NodeKind::Merge { sources, kind } => match kind {
+                MergeNodeKind::LayerBlend(mode) => {
+                    let mut sources = sources.iter().flatten().copied();
+                    let mut current =
+                        self.value_of(sources.next().expect("Merge must have inputs"));
+                    for source in sources {
+                        let foreground = self.value_of(source);
+                        let output = self.ir.new_value();
+                        self.ir.push(IRInstruction::Merge {
+                            bg: current,
+                            fg: foreground,
+                            to: output,
+                            mode: *mode,
+                        });
+                        current = output;
+                    }
+                    current
+                }
+                MergeNodeKind::Mixer => {
+                    todo!()
+                }
+            },
             NodeKind::Generator { .. } => {
                 todo!("Implement generator's lower")
             }
@@ -592,7 +655,7 @@ impl<'ir> Materializer<'ir> {
             let instruction = ir.instructions[instruction_id.0]
                 .as_ref()
                 .expect("scheduled instruction must be active");
-            for input in &instruction.inputs {
+            for input in &instruction.inputs() {
                 use_counts[input.0] += 1;
             }
         }
@@ -611,25 +674,20 @@ impl<'ir> Materializer<'ir> {
 
     fn materialize(mut self) -> anyhow::Result<RenderList> {
         let input_slot = self.allocator.alloc();
-        self.bind_value(self.ir.input, input_slot)?;
+        self.bind_value(&self.ir.input, input_slot)?;
 
         for instruction_id in self.sequence.clone() {
             let instruction = self.ir.instructions[instruction_id.0]
                 .as_ref()
                 .expect("scheduled instruction must be active");
-            let input_slots = instruction
-                .inputs
-                .iter()
-                .map(|value| {
-                    self.value_slots[value.0]
-                        .with_context(|| format!("value {} has no materialized slot", value.0))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
+            let find_slot = |value: &ValueId| {
+                self.value_slots[value.0]
+                    .with_context(|| format!("value {} has no materialized slot", value.0))
+            };
 
-            let output_slot = match &instruction.operation {
-                IROperation::Pointwise(operations) => {
-                    assert!(input_slots.len() == 1, "pointwise op is not unary");
-                    let input = input_slots[0];
+            match instruction {
+                IRInstruction::Pointwise { ops, from, to } => {
+                    let input = find_slot(from)?;
                     let output = if self.allocator.is_own(input) {
                         self.allocator.dup(input)
                     } else {
@@ -638,27 +696,45 @@ impl<'ir> Materializer<'ir> {
                     self.ops.push(Op::Pointwise {
                         from: input,
                         to: output,
-                        operations: operations.clone(),
+                        operations: ops.clone(),
                     });
-                    output
+                    self.allocator.free(input);
+                    self.bind_value(to, output)?;
                 }
-                IROperation::Merge(mode) => {
-                    assert!(input_slots.len() == 2, "merge op is not binary");
+                IRInstruction::Merge { mode, bg, fg, to } => {
                     let output = self.allocator.alloc();
+                    let fg = find_slot(fg)?;
+                    let bg = find_slot(bg)?;
                     self.ops.push(Op::Merge {
-                        fg: input_slots[0],
-                        bg: input_slots[1],
+                        fg,
+                        bg,
                         to: output,
                         mode: *mode,
                     });
-                    output
+                    self.allocator.free(fg);
+                    self.allocator.free(bg);
+                    self.bind_value(to, output)?;
+                }
+                IRInstruction::Mix { branches, base, to } => {
+                    let output = self.allocator.alloc();
+                    let from = branches
+                        .iter()
+                        .map(|branch| {
+                            let slot = find_slot(branch)?;
+                            self.allocator.free(slot);
+                            Ok(slot)
+                        })
+                        .collect::<anyhow::Result<Vec<Slot>>>()?;
+                    let base = find_slot(base)?;
+                    self.ops.push(Op::Mix {
+                        base,
+                        from,
+                        to: output,
+                    });
+                    self.allocator.free(base);
+                    self.bind_value(to, output)?;
                 }
             };
-
-            for input in input_slots {
-                self.allocator.free(input);
-            }
-            self.bind_value(instruction.output, output_slot)?;
         }
 
         let output_slot = self.value_slots[self.ir.output.0].context("IR output has no slot")?;
@@ -675,7 +751,7 @@ impl<'ir> Materializer<'ir> {
     }
 
     /// Bind a slot to a value and increase the slot's ref count for all users
-    fn bind_value(&mut self, value: ValueId, slot: Slot) -> anyhow::Result<()> {
+    fn bind_value(&mut self, value: &ValueId, slot: Slot) -> anyhow::Result<()> {
         let uses = self.use_counts[value.0];
         assert!(uses > 0, "materialized value {} has no uses", value.0);
         assert!(self.value_slots[value.0].is_none(), "value bound twice");
