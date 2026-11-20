@@ -445,7 +445,7 @@ impl fmt::Display for IR {
                 "Can only print Instruction with one output"
             );
             write!(f, "  %{} = ", instruction.outputs()[0].0)?;
-            match instruction {
+            let print_inputs = match instruction {
                 IRInstruction::Pointwise { ops, .. } => {
                     write!(f, "pointwise [")?;
                     for (operation_index, operation) in ops.iter().enumerate() {
@@ -462,22 +462,36 @@ impl fmt::Display for IR {
                         }
                     }
                     write!(f, "]")?;
+                    true
                 }
-                IRInstruction::Merge { mode, .. } => match mode {
-                    BlendMode::Top => write!(f, "merge.top")?,
-                },
-                IRInstruction::Mix { base, .. } => {
-                    write!(f, "mix (based on %{})", base.0)?;
+                IRInstruction::Merge { mode, .. } => {
+                    match mode {
+                        BlendMode::Top => write!(f, "merge.top")?,
+                    }
+                    true
                 }
-            }
+                IRInstruction::Mix { base, branches, .. } => {
+                    write!(f, "mix base %{}, branches [", base.0)?;
+                    for (index, branch) in branches.iter().enumerate() {
+                        if index != 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "%{}", branch.0)?;
+                    }
+                    write!(f, "]")?;
+                    false
+                }
+            };
 
-            for (input_index, input) in instruction.inputs().iter().enumerate() {
-                if input_index == 0 {
-                    write!(f, " ")?;
-                } else {
-                    write!(f, ", ")?;
+            if print_inputs {
+                for (input_index, input) in instruction.inputs().iter().enumerate() {
+                    if input_index == 0 {
+                        write!(f, " ")?;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}", input.0)?;
                 }
-                write!(f, "%{}", input.0)?;
             }
             writeln!(f)?;
         }

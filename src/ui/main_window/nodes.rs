@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt;
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::project::{
@@ -613,7 +614,31 @@ impl NodeCard {
 impl Render for NodeCard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = get_theme(cx);
-        let element = div()
+        let add_button = |id: SharedString| {
+            div()
+                .id(id)
+                .absolute()
+                .size(px(20.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(theme.colors.background.elevated)
+                .border_1()
+                .border_color(theme.colors.border.subtle)
+                .invisible()
+                .group_hover(NODE_ACTIONS_GROUP, |style| style.visible())
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .child(
+                    Icon::new(IconName::Plus)
+                        .size(px(16.0))
+                        .text_color(theme.colors.text.primary),
+                )
+        };
+        div()
             .id(format!("node-card-{}", self.id))
             .group(NODE_ACTIONS_GROUP)
             .absolute()
@@ -654,63 +679,36 @@ impl Render for NodeCard {
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| this.drag_finish(cx)),
-            );
-        let element = if self.selected {
-            element.child(
-                Outline::new(px(1.), px(3.))
-                    .color(theme.colors.focus)
-                    .radius(theme.radii.medium),
             )
-        } else {
-            element
-        };
-        let add_button = |id: SharedString| {
-            div()
-                .id(id)
-                .absolute()
-                .size(px(20.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .bg(theme.colors.background.elevated)
-                .border_1()
-                .border_color(theme.colors.border.subtle)
-                .invisible()
-                .group_hover(NODE_ACTIONS_GROUP, |style| style.visible())
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .child(
-                    Icon::new(IconName::CirclePlus)
-                        .size(px(16.0))
-                        .text_color(theme.colors.text.primary),
+            .when(self.selected, |card| {
+                card.child(
+                    Outline::new(px(1.), px(3.))
+                        .color(theme.colors.focus)
+                        .radius(theme.radii.medium),
                 )
-        };
-        let add_serial = add_button(format!("add-serial-{}", self.id).into())
-            .right(px(-10.0))
-            .top(px(NODE_HEIGHT / 2.0 - 10.0))
-            .on_click(cx.listener(|this, _event, _window, cx| {
-                cx.stop_propagation();
-                this.add_serial_node(cx);
-            }));
-        let element = element
+            })
             .child(Text::new("Nodes").content())
-            .child(add_serial);
-        if matches!(&self.kind, NodeCardKind::Normal {}) {
-            element.child(
-                add_button(format!("add-parallel-{}", self.id).into())
-                    .bottom(px(-10.0))
-                    .left(px(NODE_WIDTH / 2.0 - 10.0))
+            .child(
+                add_button(format!("add-serial-{}", self.id).into())
+                    .right(px(-10.0))
+                    .top(px(NODE_HEIGHT / 2.0 - 10.0))
                     .on_click(cx.listener(|this, _event, _window, cx| {
                         cx.stop_propagation();
-                        this.add_parallel_node(cx);
+                        this.add_serial_node(cx);
                     })),
             )
-        } else {
-            element
-        }
+            .when(matches!(&self.kind, NodeCardKind::Normal {}), |card| {
+                card.child(
+                    add_button(format!("add-parallel-{}", self.id).into())
+                        .bottom(px(-10.0))
+                        .left(px(NODE_WIDTH / 2.0 - 10.0))
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            cx.stop_propagation();
+                            this.add_parallel_node(cx);
+                        }))
+                        .into_any_element(),
+                )
+            })
     }
 }
 

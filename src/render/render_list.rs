@@ -101,6 +101,7 @@ impl RenderList {
             }
             Op::Mix { base, from, to } => {
                 self.check_slot(base, "base")?;
+                anyhow::ensure!(from.len() >= 2, "Mix requires at least two branches");
                 for (index, slot) in from.iter().enumerate() {
                     self.check_slot(slot, &format!("from: %{index}"))?;
                 }
