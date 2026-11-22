@@ -45,6 +45,8 @@ pub enum Op {
         from: Slot,
         to: Slot,
     },
+    /// TODO: Make input and output convert a legal pointwise op.
+    ///       e.g. u8 -> f32 ... f32 -> u8
     Pointwise {
         from: Slot,
         to: Slot,

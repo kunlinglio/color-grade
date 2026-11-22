@@ -117,6 +117,9 @@ impl Nodes {
         let edit_state = self.edit_state.read(cx);
         let selected_node = edit_state.get_selected_node();
         match edit_state.get_workflow() {
+            None => {
+                self.state = NodesState::Inactive;
+            }
             Some(workflow) => {
                 let nodes: Vec<_> = workflow.nodes().iter().map(|node| node.clone()).collect();
                 let output = workflow.output();
@@ -242,9 +245,6 @@ impl Nodes {
                     *last_edge = None;
                 }
             }
-            None => {
-                self.state = NodesState::Inactive;
-            }
         };
         cx.notify();
     }
@@ -268,8 +268,12 @@ impl Render for Nodes {
                         });
                     })
                     .child(match &self.state {
-                        NodesState::Inactive => Text::new("Select a Media to active nodes")
-                            .content()
+                        NodesState::Inactive => div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Text::new("Select a Media to active nodes").content())
                             .into_any_element(),
                         NodesState::Active {
                             node_cards,
