@@ -687,7 +687,7 @@ impl Render for NodeCard {
             .when(self.selected, |card| {
                 card.child(
                     Outline::new(px(1.), px(3.))
-                        .color(theme.colors.focus)
+                        .color(theme.colors.accent)
                         .radius(theme.radii.medium),
                 )
             })

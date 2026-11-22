@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -39,11 +40,11 @@ impl SelectOption for MediaSortBy {
             MediaSortBy::Path => "library-sort_by-path",
         }
     }
-    fn label(self) -> &'static str {
+    fn display(self) -> impl IntoElement {
         match self {
-            MediaSortBy::Hash => "Hash",
-            MediaSortBy::Name => "Name",
-            MediaSortBy::Path => "Path",
+            MediaSortBy::Hash => Icon::new(IconName::Hash),
+            MediaSortBy::Name => Icon::new(IconName::File),
+            MediaSortBy::Path => Icon::new(IconName::SquareSlash),
         }
     }
 }
@@ -415,7 +416,7 @@ fn media_list(
                     .child(render_thumb(theme, thumb));
 
                 if is_selected {
-                    card = card.bg(theme.colors.accent.normal);
+                    card = card.bg(theme.colors.accent);
                 }
 
                 div()

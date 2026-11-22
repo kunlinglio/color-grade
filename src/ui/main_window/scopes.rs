@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use strum::EnumIter;
@@ -26,12 +27,12 @@ impl SelectOption for ChosenScope {
             Self::Waveform => "scope-waveform",
         }
     }
-    fn label(self) -> &'static str {
+    fn display(self) -> impl IntoElement {
         match self {
-            Self::BrightnessHistogram => "His",
-            Self::RGBHistogram => "RGBHis",
-            Self::Vectorscope => "Vec",
-            Self::Waveform => "WF",
+            Self::BrightnessHistogram => Icon::new(IconName::ChartColumn),
+            Self::RGBHistogram => Icon::new(IconName::ChartColumnIncreasing),
+            Self::Vectorscope => Icon::new(IconName::CircleDotDashed),
+            Self::Waveform => Icon::new(IconName::ZodiacAquarius),
         }
     }
 }

@@ -1,6 +1,9 @@
 mod primitive;
 pub use primitive::*;
 
+mod controllers;
+pub use controllers::*;
+
 mod resizable;
 pub use resizable::*;
 

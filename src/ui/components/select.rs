@@ -1,18 +1,19 @@
 use std::rc::Rc;
 
+use gpui_kit::prelude::FluentBuilder;
 use strum::IntoEnumIterator;
 
 use gpui_kit::base::StyledExt;
 use gpui_kit::*;
 
-use crate::ui::components::{Button, Text};
+use crate::ui::components::Button;
 
 /// A value that can be an option in a [`SingleSelection`].
 pub trait SelectOption: Copy + PartialEq + IntoEnumIterator + 'static {
     /// The stable id of this option.
     fn id(self) -> &'static str;
-    /// The display label of this option.
-    fn label(self) -> &'static str;
+    /// The display content of this option.
+    fn display(self) -> impl IntoElement;
 }
 
 /// A horizontal row of buttons where exactly one option is selected.
@@ -61,19 +62,21 @@ impl<T: SelectOption> RenderOnce for SingleSelect<T> {
             .items_center()
             .gap_1()
             .children(T::iter().map(|value| {
-                let is_selected = selected == Some(value);
-                let button = Button::new(value.id()).child(Text::new(value.label()));
-                let button = if is_selected {
-                    button.primary()
-                } else {
-                    button.normal()
-                };
-                if let Some(cb) = &on_select {
-                    let cb = cb.clone();
-                    button.on_click(move |_event, window, app| cb(value, window, app))
-                } else {
-                    button
-                }
+                let on_select = on_select.clone();
+                Button::new(value.id())
+                    .child(value.display())
+                    .map(|button| {
+                        if selected == Some(value) {
+                            button.selected()
+                        } else {
+                            button.normal()
+                        }
+                    })
+                    .on_click(move |_event, window, app| {
+                        if let Some(cb) = on_select.as_ref() {
+                            cb(value, window, app)
+                        }
+                    })
             }))
             .refine_style(&self.style)
     }
