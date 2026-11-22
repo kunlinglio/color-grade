@@ -1,6 +1,4 @@
-use gpui_kit::base::slider::{SliderEvent, SliderValue};
 use gpui_kit::component::scroll::ScrollableElement;
-use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -9,7 +7,9 @@ use crate::project::{
     MergeNodeKind, NodeAttrDiff, NodeId, NodeKind, WorkflowDiff, WorkflowDiffPayload,
 };
 use crate::render::BlendMode;
-use crate::ui::components::{CheckBox, PopupButton, SelectOption, Slider, Text, Warn};
+use crate::ui::components::{
+    CheckBox, PopupButton, SelectOption, SliderRange, SliderWithField, Text, Warn,
+};
 use crate::ui::main_window::{EditState, state};
 
 impl SelectOption for BlendMode {
@@ -36,10 +36,8 @@ pub struct Inspector {
 enum InspectorMode {
     Empty,
     Normal {
-        brightness: Entity<SliderState>,
-        _brightness_sub: Subscription,
-        saturation: Entity<SliderState>,
-        _saturation_sub: Subscription,
+        brightness: Entity<SliderWithField>,
+        saturation: Entity<SliderWithField>,
     },
     Merge {
         mode: MergeMode,
@@ -93,7 +91,7 @@ impl MergeMode {
         let blend_mode = cx.new(|_cx| {
             PopupButton::new("merge-blend-mode", Some(blend_mode))
                 .min_width(px(135.))
-                .on_select_changed(move |new, _window, app| {
+                .on_select_changed(move |new, window, app| {
                     let _ = this.update(app, |this, cx| {
                         let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
                             return;
@@ -109,7 +107,7 @@ impl MergeMode {
                         if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx))
                         {
                             warn!("Failed to apply blend mode: {:#}", e);
-                            this.sync(cx);
+                            this.sync(window, cx);
                         }
                     });
                 })
@@ -119,7 +117,7 @@ impl MergeMode {
 }
 
 impl InspectorMode {
-    fn sync_mode(&mut self, node_kind: NodeKind, cx: &mut Context<Inspector>) {
+    fn sync_mode(&mut self, window: &mut Window, node_kind: NodeKind, cx: &mut Context<Inspector>) {
         match node_kind {
             NodeKind::Normal {
                 brightness: new_brightness,
@@ -129,76 +127,39 @@ impl InspectorMode {
                 if let InspectorMode::Normal {
                     brightness,
                     saturation,
-                    ..
                 } = self
                 {
-                    set_slider(brightness, new_brightness, cx);
-                    set_slider(saturation, new_saturation, cx);
+                    brightness.update(cx, |field, cx| field.set_value(new_brightness, window, cx));
+                    saturation.update(cx, |field, cx| field.set_value(new_saturation, window, cx));
                 } else {
-                    let brightness = cx.new(|_cx| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(2.0)
-                            .step(0.01)
-                            .default_value(1.0)
-                    });
-                    set_slider(&brightness, new_brightness, cx);
-                    let saturation = cx.new(|_cx| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(2.0)
-                            .step(0.01)
-                            .default_value(1.0)
-                    });
-                    set_slider(&saturation, new_saturation, cx);
-                    let _brightness_sub = cx.subscribe(&brightness, |this, _state, event, cx| {
-                        if let SliderEvent::Change(SliderValue::Single(value)) = event {
-                            let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
-                                return;
-                            };
-                            let diff = WorkflowDiff {
-                                payload: WorkflowDiffPayload::NodeAttr(
-                                    node_id,
-                                    NodeAttrDiff::Brightness(*value),
-                                ),
-                            };
-                            let edit_state = this.edit_state.clone();
-                            let id = cx.entity_id();
-                            if let Err(e) =
-                                edit_state.update(cx, |this, cx| this.update(diff, id, cx))
-                            {
-                                warn!("Failed to apply brightness changes: {:#}", e);
-                                this.sync(cx);
-                            };
-                        }
-                    });
-                    let _saturation_sub = cx.subscribe(&saturation, |this, _state, event, cx| {
-                        if let SliderEvent::Change(SliderValue::Single(value)) = event {
-                            let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
-                                return;
-                            };
-                            let diff = WorkflowDiff {
-                                payload: WorkflowDiffPayload::NodeAttr(
-                                    node_id,
-                                    NodeAttrDiff::Saturation(*value),
-                                ),
-                            };
-                            let edit_state = this.edit_state.clone();
-                            let id = cx.entity_id();
-                            if let Err(e) =
-                                edit_state.update(cx, |this, cx| this.update(diff, id, cx))
-                            {
-                                warn!("Failed to apply saturation changes: {:#}", e);
-                                this.sync(cx);
-                            };
-                        }
-                    });
+                    let brightness = new_slider_field(
+                        "Brightness",
+                        new_brightness,
+                        SliderRange {
+                            min: 0.0,
+                            max: 2.0,
+                            step: 0.01,
+                        },
+                        NodeAttrDiff::Brightness,
+                        window,
+                        cx,
+                    );
+                    let saturation = new_slider_field(
+                        "Saturation",
+                        new_saturation,
+                        SliderRange {
+                            min: 0.0,
+                            max: 2.0,
+                            step: 0.01,
+                        },
+                        NodeAttrDiff::Saturation,
+                        window,
+                        cx,
+                    );
                     *self = InspectorMode::Normal {
                         brightness,
-                        _brightness_sub,
                         saturation,
-                        _saturation_sub,
-                    }
+                    };
                 }
             }
             NodeKind::Merge { kind, .. } => {
@@ -219,24 +180,27 @@ impl InspectorMode {
 }
 
 impl Inspector {
-    pub fn new(cx: &mut Context<Self>, edit_state: Entity<EditState>) -> Self {
-        cx.subscribe(
+    pub fn new(window: &mut Window, cx: &mut Context<Self>, edit_state: Entity<EditState>) -> Self {
+        cx.subscribe_in(
             &edit_state,
-            |this, _edit_state, _event: &state::SessionChanged, cx| {
-                this.sync(cx);
+            window,
+            |this, _edit_state, _event: &state::SessionChanged, window, cx| {
+                this.sync(window, cx);
             },
         )
         .detach();
-        cx.subscribe(
+        cx.subscribe_in(
             &edit_state,
-            |this, _edit_state, _event: &state::SelectedNodeChanged, cx| {
-                this.sync(cx);
+            window,
+            |this, _edit_state, _event: &state::SelectedNodeChanged, window, cx| {
+                this.sync(window, cx);
             },
         )
         .detach();
-        cx.subscribe(
+        cx.subscribe_in(
             &edit_state,
-            |_this, _edit_state, event: &state::NodeAttrChanged, cx| {
+            window,
+            |_this, _edit_state, event: &state::NodeAttrChanged, _window, cx| {
                 let id = cx.entity_id();
                 assert_eq!(
                     id, event.origin,
@@ -250,11 +214,11 @@ impl Inspector {
             edit_state,
         };
         // Sync for the first time
-        inspector.sync(cx);
+        inspector.sync(window, cx);
         inspector
     }
 
-    fn sync(&mut self, cx: &mut Context<Self>) {
+    fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workflow) = self.edit_state.read(cx).get_workflow() else {
             self.mode = InspectorMode::Empty;
             cx.notify();
@@ -271,7 +235,7 @@ impl Inspector {
                 node_id, workflow
             )
         });
-        self.mode.sync_mode(node.kind.clone(), cx);
+        self.mode.sync_mode(window, node.kind.clone(), cx);
         cx.notify();
     }
 }
@@ -301,29 +265,16 @@ impl Render for Inspector {
                         InspectorMode::Normal {
                             brightness,
                             saturation,
-                            ..
                         } => container
-                            .child(
-                                div()
-                                    .v_flex()
-                                    .gap_2()
-                                    .child(Text::new("Brightness").content())
-                                    .child(Slider::new(brightness)),
-                            )
-                            .child(
-                                div()
-                                    .v_flex()
-                                    .gap_2()
-                                    .child(Text::new("Saturation").content())
-                                    .child(Slider::new(saturation)),
-                            )
+                            .child(brightness.clone())
+                            .child(saturation.clone())
                             .into_any_element(),
                         InspectorMode::Merge { mode } => {
                             let container = container.child(single_line_item(
                                 "Use Layer Blender",
                                 CheckBox::new("use-layer-blende-mode")
                                     .when(mode.layer_blend(), |check_box| check_box.select())
-                                    .on_change(move |enabled, _window, app| {
+                                    .on_change(move |enabled, window, app| {
                                         let _ = this.update(app, |this, cx| {
                                             let InspectorMode::Merge { mode } = &mut this.mode
                                             else {
@@ -345,10 +296,10 @@ impl Render for Inspector {
                                                 .update(cx, |this, cx| this.update(diff, id, cx))
                                             {
                                                 warn!(
-                                                    "Failed to apply saturation changes: {:#}",
+                                                    "Failed to apply merge mode changes: {:#}",
                                                     e
                                                 );
-                                                this.sync(cx);
+                                                this.sync(window, cx);
                                             };
                                             cx.notify();
                                         });
@@ -383,21 +334,38 @@ fn single_line_item(
         .child(component)
 }
 
-fn set_slider(slider: &Entity<SliderState>, value: f32, cx: &mut Context<Inspector>) {
-    let old_slider = slider.read(cx);
-    let current = match old_slider.value() {
-        SliderValue::Single(current) => current,
-        _ => return,
-    };
-    if (current - value).abs() <= f32::EPSILON {
-        return;
-    }
-    slider.write(
-        cx,
-        SliderState::new()
-            .min(old_slider.min_value())
-            .max(old_slider.max_value())
-            .step(old_slider.step_value())
-            .default_value(value),
-    );
+fn new_slider_field(
+    label: &'static str,
+    value: f32,
+    range: SliderRange,
+    on_diff: fn(f32) -> NodeAttrDiff,
+    window: &mut Window,
+    cx: &mut Context<Inspector>,
+) -> Entity<SliderWithField> {
+    let this = cx.weak_entity();
+    cx.new(move |cx| {
+        SliderWithField::new(
+            label,
+            value,
+            range,
+            move |value, window, app| {
+                let _ = this.update(app, |this, cx| {
+                    let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
+                        return;
+                    };
+                    let diff = WorkflowDiff {
+                        payload: WorkflowDiffPayload::NodeAttr(node_id, on_diff(value)),
+                    };
+                    let edit_state = this.edit_state.clone();
+                    let id = cx.entity_id();
+                    if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx)) {
+                        warn!("Failed to apply {} changes: {:#}", label, e);
+                        this.sync(window, cx);
+                    }
+                });
+            },
+            window,
+            cx,
+        )
+    })
 }

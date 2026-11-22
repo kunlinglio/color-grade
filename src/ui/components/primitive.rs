@@ -1,6 +1,7 @@
 use gpui_kit::IntoElement;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt;
+use gpui_kit::base::input::{Input, InputEditorStyle, InputState};
 use gpui_kit::component::spinner::Spinner as BaseSpinner;
 use gpui_kit::component::{Sizable as _, Size as ComponentSize};
 use gpui_kit::*;
@@ -246,6 +247,91 @@ impl RenderOnce for Outline {
             .rounded(radius + inset)
             .border(self.width)
             .border_color(self.color.unwrap_or(theme.colors.accent))
+            .refine_style(&self.style)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct TextInput {
+    state: Entity<InputState>,
+    width: Option<Pixels>,
+    align: TextAlign,
+    style: StyleRefinement,
+}
+
+impl TextInput {
+    pub fn new(state: &Entity<InputState>) -> Self {
+        Self {
+            state: state.clone(),
+            width: None,
+            align: TextAlign::Left,
+            style: StyleRefinement::default(),
+        }
+    }
+
+    pub fn width(mut self, width: impl Into<Pixels>) -> Self {
+        self.width = Some(width.into());
+        self
+    }
+
+    pub fn align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
+    }
+}
+
+impl Styled for TextInput {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for TextInput {
+    fn render(self, window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        let focused = self.state.read(app).focus_handle(app).is_focused(window);
+        let accent: Hsla = theme.colors.accent.into();
+        let align = self.align;
+
+        // Overwrite gpui-kit's default theme
+        self.state.update(app, |state, cx| {
+            state.set_text_align(align, cx);
+            state.set_editor_style(InputEditorStyle {
+                selection: accent.opacity(0.35),
+                caret: accent,
+                ..Default::default()
+            });
+        });
+
+        let state = self.state;
+        div()
+            .flex()
+            .items_center()
+            .w(self.width.unwrap_or(px(64.)))
+            .h(px(24.))
+            .px_2()
+            .rounded(theme.radii.small)
+            .bg(theme.colors.background.surface)
+            .border_1()
+            .border_color(if focused {
+                theme.colors.accent
+            } else {
+                // Use same color with background
+                // to make this element has "no" border while not focused
+                // but avoid size changing.
+                theme.colors.background.surface
+            })
+            .text_size(theme.typography.content)
+            .text_color(theme.colors.text.primary)
+            .on_mouse_down(MouseButton::Left, {
+                let state = state.clone();
+                move |_, window, cx| {
+                    let handle = state.read(cx).focus_handle(cx);
+                    handle.focus(window, cx);
+                }
+            })
+            .on_mouse_down_out(|_, window, cx| window.blur(cx))
+            .child(Input::new(&state))
             .refine_style(&self.style)
     }
 }

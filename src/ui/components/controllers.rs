@@ -176,12 +176,14 @@ impl RenderOnce for Slider {
                             .w_full()
                             .h(px(4.))
                             .bg(theme.colors.background.elevated)
+                            .rounded(theme.radii.small)
                             .child(
                                 div()
                                     .absolute()
                                     .h_full()
                                     .left(relative(0.))
                                     .right(relative(1. - end))
+                                    .rounded(theme.radii.small)
                                     .bg(theme.colors.accent),
                             )
                             .child(
@@ -270,7 +272,7 @@ impl RenderOnce for CheckBox {
                     .border_color(if checked {
                         theme.colors.accent
                     } else {
-                        theme.colors.border.subtle
+                        theme.colors.background.surface
                     })
                     .hover(move |style| {
                         style.bg(if checked {

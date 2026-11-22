@@ -65,6 +65,7 @@ impl<T: SelectOption> RenderOnce for SegmentedSelect<T> {
             .children(T::iter().map(|value| {
                 let on_select = on_select.clone();
                 Button::new(value.id())
+                    .p_1()
                     .child(value.display())
                     .map(|button| {
                         if selected == Some(value) {
@@ -177,6 +178,7 @@ impl<T: SelectOption> Render for PopupButton<T> {
                 let this = this_for_min_width;
                 Button::new(id)
                     .bg(theme.colors.background.surface)
+                    .p_1()
                     .flex()
                     .justify_start()
                     .items_center()
@@ -197,7 +199,7 @@ impl<T: SelectOption> Render for PopupButton<T> {
                         Icon::new(IconName::ChevronsUpDown)
                             .flex_none()
                             .text_color(theme.colors.text.muted)
-                            .size(theme.typography.content),
+                            .size(theme.typography.content + px(2.)),
                     )
                     .child(
                         div().flex_1().flex().justify_center().items_center().child(

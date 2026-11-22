@@ -33,7 +33,12 @@ pub struct MainWindow {
 }
 
 impl MainWindow {
-    fn new(cx: &mut Context<Self>, runtime: ProjectRuntimeHandler, project_path: PathBuf) -> Self {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        runtime: ProjectRuntimeHandler,
+        project_path: PathBuf,
+    ) -> Self {
         let path = project_path.clone();
 
         cx.on_release(move |_, app| {
@@ -53,7 +58,7 @@ impl MainWindow {
         let edit_state = cx.new(|_cx| EditState::new());
         let library = cx.new(|cx| library::Library::new(cx, runtime.clone(), edit_state.clone()));
         let nodes = cx.new(|cx| nodes::Nodes::new(cx, edit_state.clone()));
-        let inspector = cx.new(|cx| inspector::Inspector::new(cx, edit_state.clone()));
+        let inspector = cx.new(|cx| inspector::Inspector::new(window, cx, edit_state.clone()));
         let scopes = cx.new(|cx| scopes::Scopes::new(cx, runtime.clone()));
         MainWindow {
             path,
@@ -87,8 +92,9 @@ impl MainWindow {
             app_owns_titlebar_drag: true,
             ..Default::default()
         };
-        gpui_kit::open_window(options, app, |_window, app| {
-            let main_window_handler = app.new(|cx| MainWindow::new(cx, runtime, project_path));
+        gpui_kit::open_window(options, app, |window, app| {
+            let main_window_handler =
+                app.new(|cx| MainWindow::new(window, cx, runtime, project_path));
             main_window_handler
         })
         .expect("Failed to open MainWindow");
