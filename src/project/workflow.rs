@@ -65,7 +65,7 @@ pub enum NodeKind {
     },
     /// A layer merge node with n input and 1 output
     Merge {
-        /// Ordered bottom-to-top.
+        /// Ordered Top-bottom.
         /// `None` is an unconnected slot: it is ignored when compiling, but a Merge
         /// needs at least two connected inputs to be considered finished.
         sources: Vec<Option<Source>>,
@@ -75,18 +75,13 @@ pub enum NodeKind {
     Generator { mode: GeneratorMode },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy, Default)]
 pub enum MergeNodeKind {
     /// Normal layer blend, just like ps.
     LayerBlend(BlendMode),
     /// Layer mixer, mix all changes from different diverse directly.
+    #[default]
     Mixer,
-}
-
-impl Default for MergeNodeKind {
-    fn default() -> Self {
-        Self::Mixer
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -109,23 +104,27 @@ impl NodeKind {
         }
     }
     /// Return if diff legal
-    fn apply_diff(&mut self, diff: &NodeKindDiff) -> anyhow::Result<()> {
+    fn apply_diff(&mut self, diff: &NodeAttrDiff) -> anyhow::Result<()> {
         match (self, diff) {
-            (NodeKind::Normal { brightness, .. }, NodeKindDiff::Brightness(new)) => {
+            (NodeKind::Normal { brightness, .. }, NodeAttrDiff::Brightness(new)) => {
                 *brightness = *new;
             }
-            (NodeKind::Normal { saturation, .. }, NodeKindDiff::Saturation(new)) => {
+            (NodeKind::Normal { saturation, .. }, NodeAttrDiff::Saturation(new)) => {
                 *saturation = *new;
+            }
+            (NodeKind::Merge { kind, .. }, NodeAttrDiff::MergeMode(new)) => {
+                *kind = *new;
             }
             _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
         Ok(())
     }
 
-    fn verify_diff(&self, diff: &NodeKindDiff) -> anyhow::Result<()> {
+    fn verify_diff(&self, diff: &NodeAttrDiff) -> anyhow::Result<()> {
         match (self, diff) {
-            (NodeKind::Normal { .. }, NodeKindDiff::Brightness(..)) => {}
-            (NodeKind::Normal { .. }, NodeKindDiff::Saturation(..)) => {}
+            (NodeKind::Normal { .. }, NodeAttrDiff::Brightness(..)) => {}
+            (NodeKind::Normal { .. }, NodeAttrDiff::Saturation(..)) => {}
+            (NodeKind::Merge { .. }, NodeAttrDiff::MergeMode(..)) => {}
             _ => anyhow::bail!("Unmatch NodeKindDiff"),
         }
         Ok(())
@@ -765,15 +764,16 @@ pub struct WorkflowDiff {
 
 #[derive(Clone, Copy)]
 pub enum WorkflowDiffPayload {
-    NodeAttr(NodeId, NodeKindDiff),
+    NodeAttr(NodeId, NodeAttrDiff),
     NodePos(NodeId, (f32, f32)),
     Topology(WorkflowTopoChange),
 }
 
 #[derive(Clone, Copy)]
-pub enum NodeKindDiff {
+pub enum NodeAttrDiff {
     Brightness(f32),
     Saturation(f32),
+    MergeMode(MergeNodeKind),
 }
 
 #[derive(Clone, Copy)]

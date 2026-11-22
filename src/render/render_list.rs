@@ -1,4 +1,5 @@
 use anyhow::Context;
+use strum::EnumIter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Slot(u32);
@@ -27,9 +28,11 @@ pub struct RenderList {
     pub output: Slot,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Default)]
 pub enum BlendMode {
+    #[default]
     Top,
+    Bottom,
     // TODO: Add more blend mode
 }
 

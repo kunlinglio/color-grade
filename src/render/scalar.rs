@@ -297,6 +297,7 @@ mod kernel {
 
         Ok(match mode {
             BlendMode::Top => foreground.clone(),
+            BlendMode::Bottom => background.clone(),
         })
     }
 

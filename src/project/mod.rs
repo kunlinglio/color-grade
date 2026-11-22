@@ -5,6 +5,6 @@ mod workflow;
 pub use runtime::{ProjectRuntime, ProjectRuntimeHandler, ProjectRuntimeThread};
 pub use session::SessionClient;
 pub use workflow::{
-    Node, NodeId, NodeKind, NodeKindDiff, Source, Workflow, WorkflowDiff, WorkflowDiffPayload,
-    WorkflowTopoChange,
+    MergeNodeKind, Node, NodeAttrDiff, NodeId, NodeKind, Source, Workflow, WorkflowDiff,
+    WorkflowDiffPayload, WorkflowTopoChange,
 };

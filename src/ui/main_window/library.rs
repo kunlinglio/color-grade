@@ -12,7 +12,7 @@ use crate::media;
 use crate::media::media_type::Media;
 use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
-use crate::ui::components::{Icon, Loading, ResizeSensitive, SelectOption, SingleSelect, Text};
+use crate::ui::components::{Icon, Loading, ResizeSensitive, SegmentedSelect, SelectOption, Text};
 use crate::ui::main_window::{EditState, state};
 use crate::ui::{Theme, get_theme};
 
@@ -302,7 +302,7 @@ impl Render for Library {
                     .justify_between()
                     .child(Text::new("Library").title())
                     .child(
-                        SingleSelect::<MediaSortBy>::new()
+                        SegmentedSelect::<MediaSortBy>::new()
                             .select(self.media_list.sort_by)
                             .on_select(move |sort_by, _window, app| {
                                 let _ = this_for_select.update(app, |this, cx| {

@@ -7,7 +7,7 @@ use strum::EnumIter;
 
 use crate::project::ProjectRuntimeHandler;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
-use crate::ui::components::{ResizeSensitive, SelectOption, SingleSelect, Text};
+use crate::ui::components::{ResizeSensitive, SegmentedSelect, SelectOption, Text};
 use crate::ui::get_theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, EnumIter)]
@@ -175,7 +175,7 @@ impl Render for Scopes {
                     .justify_between()
                     .child(Text::new("Scopes").title())
                     .child(
-                        SingleSelect::<ChosenScope>::new()
+                        SegmentedSelect::<ChosenScope>::new()
                             .select(self.chosen)
                             .on_select(move |scope, _window, app| {
                                 let _ = this.update(app, |this, cx| {

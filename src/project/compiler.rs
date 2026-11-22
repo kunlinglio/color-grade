@@ -467,6 +467,7 @@ impl fmt::Display for IR {
                 IRInstruction::Merge { mode, .. } => {
                     match mode {
                         BlendMode::Top => write!(f, "merge.top")?,
+                        BlendMode::Bottom => write!(f, "merge.bottom")?,
                     }
                     true
                 }
@@ -559,7 +560,7 @@ impl<'workflow> Lowerer<'workflow> {
             }
             NodeKind::Merge { sources, kind } => match kind {
                 MergeNodeKind::LayerBlend(mode) => {
-                    let mut sources = sources.iter().flatten().copied();
+                    let mut sources = sources.iter().flatten().copied().rev();
                     let mut current =
                         self.value_of(sources.next().expect("Merge must have inputs"));
                     for source in sources {

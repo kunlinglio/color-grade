@@ -1,8 +1,10 @@
 use std::rc::Rc;
 
+use crate::ui::components::Icon;
 use gpui_kit::IntoElement;
-use gpui_kit::base::StyledExt;
+use gpui_kit::assets::IconName;
 use gpui_kit::base::slider::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack};
+use gpui_kit::base::{CheckboxState, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -17,6 +19,7 @@ pub struct Button {
     style: StyleRefinement,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     preset: Option<ButtonPreset>,
+    allow_propagation: bool,
 }
 
 enum ButtonPreset {
@@ -56,7 +59,12 @@ impl Button {
             style: StyleRefinement::default(),
             on_click: None,
             preset: None,
+            allow_propagation: false,
         }
+    }
+    pub fn allow_propagation(mut self) -> Self {
+        self.allow_propagation = true;
+        self
     }
     pub fn on_click(
         mut self,
@@ -92,6 +100,7 @@ impl RenderOnce for Button {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
         let on_click = self.on_click.clone();
+        let allow_propagation = self.allow_propagation;
         gpui_kit::base::Button::new(self.id)
             .text_size(theme.typography.content)
             .rounded(theme.radii.medium)
@@ -99,11 +108,15 @@ impl RenderOnce for Button {
             .focus_visible(|s| s.border_1().border_color(theme.colors.accent))
             // Consume pointer events so they don't bubble to an interactive
             // ancestor such as the title bar.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .when(!allow_propagation, |button| {
+                button.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            })
             .children(self.children)
             .on_click(move |event, window, cx| {
                 if let Some(on_click) = on_click.as_ref() {
-                    cx.stop_propagation();
+                    if !allow_propagation {
+                        cx.stop_propagation();
+                    }
                     on_click(event, window, cx);
                 };
             })
@@ -183,6 +196,99 @@ impl RenderOnce for Slider {
                                     .bg(theme.colors.text.primary),
                             ),
                     ),
+            )
+            .refine_style(&self.style)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct CheckBox {
+    id: ElementId,
+    selected: bool,
+    style: StyleRefinement,
+    on_change: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+}
+
+impl CheckBox {
+    pub fn new(id: impl Into<ElementId>) -> Self {
+        Self {
+            id: id.into(),
+            selected: false,
+            style: StyleRefinement::default(),
+            on_change: None,
+        }
+    }
+    pub fn select(mut self) -> Self {
+        self.selected = true;
+        self
+    }
+    pub fn on_change(mut self, callback: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_change = Some(Rc::new(callback));
+        self
+    }
+}
+
+impl Styled for CheckBox {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for CheckBox {
+    fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
+        let theme = get_theme(app);
+        let checked = self.selected;
+        let on_change = self.on_change.clone();
+
+        gpui_kit::base::Checkbox::new(self.id)
+            .checked(checked)
+            .on_change(move |state, _event, window, app| {
+                if let Some(cb) = on_change.as_ref() {
+                    cb(state == CheckboxState::Checked, window, app);
+                }
+            })
+            .rounded(theme.radii.small)
+            .focus_visible(|style| {
+                style
+                    .border_1()
+                    .border_color(theme.colors.accent)
+                    .rounded(theme.radii.small)
+            })
+            .child(
+                div()
+                    .size_auto()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_1()
+                    .rounded(theme.radii.small)
+                    .bg(if checked {
+                        theme.colors.accent
+                    } else {
+                        theme.colors.background.surface
+                    })
+                    .border_color(if checked {
+                        theme.colors.accent
+                    } else {
+                        theme.colors.border.subtle
+                    })
+                    .hover(move |style| {
+                        style.bg(if checked {
+                            theme.colors.accent
+                        } else {
+                            theme.colors.interactive.hover
+                        })
+                    })
+                    .child(div().size(theme.typography.content).flex_none().when(
+                        checked,
+                        |element| {
+                            element.child(
+                                Icon::new(IconName::Check)
+                                    .text_color(theme.colors.text.inverse)
+                                    .size(theme.typography.content),
+                            )
+                        },
+                    )),
             )
             .refine_style(&self.style)
     }
