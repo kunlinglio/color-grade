@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -8,13 +6,13 @@ use gpui_kit::*;
 use crate::project::{NodeId, Source};
 use crate::ui::get_theme;
 
-use super::NODES_PADDING;
+use super::Nodes;
 use super::node_card::{NodeCard, PortId};
 
 pub(super) struct Edge {
     from: EdgeFrom,
     to: EdgeTo,
-    nodes_size: Rc<RefCell<(f32, f32)>>,
+    father: WeakEntity<Nodes>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -34,7 +32,7 @@ impl Edge {
         source: &Source,
         node_cards: &HashMap<NodeId, Entity<NodeCard>>,
         to: EdgeTo,
-        nodes_size: Rc<RefCell<(f32, f32)>>,
+        father: WeakEntity<Nodes>,
     ) -> Self {
         let from = match source {
             Source::Input => EdgeFrom::Input,
@@ -61,20 +59,22 @@ impl Edge {
             from,
             to,
             _subscriptions,
-            nodes_size,
+            father,
         }
     }
     fn anchors(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {
+        let father = self
+            .father
+            .upgrade()
+            .expect("Father should not quit")
+            .read(cx);
         let from = match &self.from {
-            EdgeFrom::Input => point(px(NODES_PADDING), px(self.nodes_size.borrow().1 / 2.)), // Input port
-            EdgeFrom::Node(card) => card.upgrade()?.read(cx).output_anchor(),
+            EdgeFrom::Input => father.input_anchor(), // Input port
+            EdgeFrom::Node(card) => card.upgrade()?.read(cx).output_anchor(false),
         };
         let to = match &self.to {
-            EdgeTo::Output => point(
-                px(self.nodes_size.borrow().0 - NODES_PADDING),
-                px(self.nodes_size.borrow().1 / 2.),
-            ), // Output port
-            EdgeTo::Node(port, card) => card.upgrade()?.read(cx).input_anchor(*port),
+            EdgeTo::Output => father.output_anchor(), // Output port
+            EdgeTo::Node(port, card) => card.upgrade()?.read(cx).input_anchor(*port, false),
         };
         Some((from, to))
     }

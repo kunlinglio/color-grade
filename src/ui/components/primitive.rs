@@ -314,12 +314,9 @@ impl RenderOnce for TextInput {
             .bg(theme.colors.background.surface)
             .border_1()
             .border_color(if focused {
-                theme.colors.accent
+                theme.colors.accent.into()
             } else {
-                // Use same color with background
-                // to make this element has "no" border while not focused
-                // but avoid size changing.
-                theme.colors.background.surface
+                transparent_black()
             })
             .text_size(theme.typography.content)
             .text_color(theme.colors.text.primary)

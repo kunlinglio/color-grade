@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use gpui_kit::base::StyledExt;
 use gpui_kit::prelude::*;
@@ -8,16 +6,18 @@ use gpui_kit::*;
 
 use crate::project::{NodeId, NodeKind, Source};
 use crate::ui::components::{ResizeSensitive, Text};
+use crate::ui::get_theme;
 use crate::ui::main_window::state::{self, EditState};
 
+use super::NODES_PADDING;
 use super::edge::{Edge, EdgeTo};
 use super::hud::NodePosHud;
-use super::node_card::{NodeCard, PortId};
+use super::node_card::{NodeCard, PortId, render_port};
 
 pub struct Nodes {
     edit_state: Entity<EditState>,
     state: NodesState,
-    size: Rc<RefCell<(f32, f32)>>,
+    size: (f32, f32),
     pos_hud: Entity<NodePosHud>,
 }
 
@@ -104,7 +104,7 @@ impl Nodes {
         Nodes {
             edit_state,
             state: NodesState::Inactive,
-            size: Rc::new(RefCell::new((0., 0.))),
+            size: (0., 0.),
             pos_hud,
         }
     }
@@ -135,6 +135,7 @@ impl Nodes {
                     unreachable!("Inactive state must have been normalized above");
                 };
                 let mut outdated: HashSet<_> = node_cards.keys().copied().collect();
+                let weak_this = cx.weak_entity();
                 // update node cards
                 for node in &nodes {
                     let id = node.node_id;
@@ -148,16 +149,14 @@ impl Nodes {
                             outdated.remove(&id);
                         }
                         None => {
-                            let entity_id = cx.entity_id();
                             let hud = self.pos_hud.downgrade();
                             let card = cx.new(|_cx| {
                                 NodeCard::new(
                                     &node,
                                     self.edit_state.clone(),
                                     selected,
-                                    entity_id,
-                                    self.size.clone(),
                                     hud,
+                                    weak_this.clone(),
                                 )
                             });
                             node_cards.insert(id, card.clone());
@@ -203,14 +202,14 @@ impl Nodes {
                             Some(edge) => {
                                 edge.update(cx, |this, cx| {
                                     *this =
-                                        Edge::new(cx, source, node_cards, to, self.size.clone());
+                                        Edge::new(cx, source, node_cards, to, weak_this.clone());
                                     cx.notify();
                                 });
                                 outdated.remove(&(*source, id, port));
                             }
                             None => {
                                 let edge = cx.new(|cx| {
-                                    Edge::new(cx, source, node_cards, to, self.size.clone())
+                                    Edge::new(cx, source, node_cards, to, weak_this.clone())
                                 });
                                 edge_cache.insert((*source, id, port), edge);
                             }
@@ -226,13 +225,13 @@ impl Nodes {
                     match last_edge {
                         Some(edge) => {
                             edge.update(cx, |this, cx| {
-                                *this = Edge::new(cx, &output, node_cards, to, self.size.clone());
+                                *this = Edge::new(cx, &output, node_cards, to, weak_this.clone());
                                 cx.notify();
                             });
                         }
                         None => {
                             let edge = cx.new(|cx| {
-                                Edge::new(cx, &output, node_cards, to, self.size.clone())
+                                Edge::new(cx, &output, node_cards, to, weak_this.clone())
                             });
                             *last_edge = Some(edge)
                         }
@@ -244,10 +243,23 @@ impl Nodes {
         };
         cx.notify();
     }
+
+    pub(super) fn size(&self) -> (f32, f32) {
+        self.size
+    }
+
+    pub(super) fn input_anchor(&self) -> Point<Pixels> {
+        point(px(NODES_PADDING), px(self.size.1 / 2.))
+    }
+
+    pub(super) fn output_anchor(&self) -> Point<Pixels> {
+        point(px(self.size.0 - NODES_PADDING), px(self.size.1 / 2.))
+    }
 }
 
 impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = get_theme(cx);
         let this = cx.weak_entity();
         div()
             .size_full()
@@ -260,7 +272,7 @@ impl Render for Nodes {
                         let _ = this.update(app, |this, _cx| {
                             let width = f32::from(bounds.size.width);
                             let height = f32::from(bounds.size.height);
-                            *this.size.borrow_mut() = (width, height);
+                            this.size = (width, height);
                         });
                     })
                     .child(match &self.state {
@@ -283,6 +295,8 @@ impl Render for Nodes {
                             .children(edge_cache.values().cloned())
                             .children(last_edge.iter().cloned())
                             .children(node_cards.values().cloned())
+                            .child(render_port(self.input_anchor(), &theme))
+                            .child(render_port(self.output_anchor(), &theme))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {

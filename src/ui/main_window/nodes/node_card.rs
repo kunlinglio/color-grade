@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -9,11 +6,11 @@ use crate::project::{
     Node, NodeId, NodeKind, WorkflowDiff, WorkflowDiffPayload, WorkflowTopoChange,
 };
 use crate::ui::components::{Icon, Outline, Text};
-use crate::ui::get_theme;
 use crate::ui::main_window::state::EditState;
+use crate::ui::{Theme, get_theme};
 
-use super::NODES_PADDING;
 use super::hud::{NodePosHud, PosInfo};
+use super::{NODES_PADDING, Nodes, PORT_SIZE};
 
 const NODE_WIDTH: f32 = 120.;
 const NODE_HEIGHT: f32 = 60.;
@@ -25,7 +22,7 @@ pub(super) type PortId = usize;
 
 pub(super) struct NodeCard {
     id: NodeId,
-    nodes_entity_id: EntityId,
+    father: WeakEntity<Nodes>,
     selected: bool,
     pos: (f32, f32),
     kind: NodeCardKind,
@@ -33,7 +30,6 @@ pub(super) struct NodeCard {
     edit_state: Entity<EditState>,
     /// States to support drag
     drag: DragState,
-    nodes_size: Rc<RefCell<(f32, f32)>>,
     /// Weak ref to Hud for update
     pos_hud: WeakEntity<NodePosHud>,
 }
@@ -57,9 +53,8 @@ impl NodeCard {
         node: &Node,
         edit_state: Entity<EditState>,
         selected: bool,
-        nodes_entity_id: EntityId,
-        nodes_size: Rc<RefCell<(f32, f32)>>,
         pos_hud: WeakEntity<NodePosHud>,
+        father: WeakEntity<Nodes>,
     ) -> Self {
         let kind = match &node.kind {
             NodeKind::Normal { .. } => NodeCardKind::Normal {},
@@ -70,14 +65,13 @@ impl NodeCard {
         };
         Self {
             id: node.node_id,
-            nodes_entity_id,
             selected: selected,
             pos: node.pos,
             kind,
             edit_state,
             drag: DragState::Empty,
-            nodes_size,
             pos_hud,
+            father,
         }
     }
     pub(super) fn sync(&mut self, node: &Node, selected: bool) {
@@ -110,7 +104,7 @@ impl NodeCard {
             start_pos.0 + f32::from(cur_cursor.x - start_cursor.x),
             start_pos.1 + f32::from(cur_cursor.y - start_cursor.y),
         );
-        self.pos = self.clamp_pos(target_pos);
+        self.pos = self.clamp_pos(target_pos, cx);
         if let Some(hud) = &mut self.pos_hud.upgrade() {
             hud.update(cx, |this, cx| {
                 this.update(
@@ -125,8 +119,13 @@ impl NodeCard {
         cx.notify();
     }
 
-    fn clamp_pos(&self, target: (f32, f32)) -> (f32, f32) {
-        let size = self.nodes_size.borrow();
+    fn clamp_pos(&self, target: (f32, f32), cx: &mut Context<Self>) -> (f32, f32) {
+        let size = self
+            .father
+            .upgrade()
+            .expect("Father should not quit")
+            .read(cx)
+            .size();
         let max_x = (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING);
         let max_y = (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING);
         (
@@ -136,23 +135,24 @@ impl NodeCard {
     }
 
     fn add_serial_node(&mut self, cx: &mut Context<Self>) {
-        let pos = self.clamp_pos((self.pos.0 + NODE_WIDTH + NODE_ADD_GAP, self.pos.1));
+        let pos = self.clamp_pos((self.pos.0 + NODE_WIDTH + NODE_ADD_GAP, self.pos.1), cx);
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddSerialNode {
                 from: self.id,
                 pos,
             }),
         };
+        let father_id = self.father_id();
         if let Err(error) = self
             .edit_state
-            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
+            .update(cx, |state, cx| state.update(diff, father_id, cx))
         {
             warn!("Failed to add serial node: {error:#}");
         }
     }
 
     fn add_parallel_node(&mut self, cx: &mut Context<Self>) {
-        let pos = self.clamp_pos((self.pos.0, self.pos.1 + NODE_HEIGHT + NODE_ADD_GAP));
+        let pos = self.clamp_pos((self.pos.0, self.pos.1 + NODE_HEIGHT + NODE_ADD_GAP), cx);
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddParreleNode {
                 from: self.id,
@@ -160,9 +160,10 @@ impl NodeCard {
                 node_width: NODE_WIDTH,
             }),
         };
+        let father_id = self.father_id();
         if let Err(error) = self
             .edit_state
-            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
+            .update(cx, |state, cx| state.update(diff, father_id, cx))
         {
             warn!("Failed to add parallel node: {error:#}");
         }
@@ -184,23 +185,41 @@ impl NodeCard {
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::NodePos(self.id, self.pos),
         };
+        let father_id = self.father_id();
         if let Err(e) = self
             .edit_state
-            .update(cx, |state, cx| state.update(diff, self.nodes_entity_id, cx))
+            .update(cx, |state, cx| state.update(diff, father_id, cx))
         {
             self.pos = start_pos;
             warn!("Failed to update workflow: {:#}", e);
             return;
         };
     }
-    pub(super) fn output_anchor(&self) -> Point<Pixels> {
-        point(
-            px(self.pos.0 + NODE_WIDTH),
-            px(self.pos.1 + NODE_HEIGHT / 2.0),
-        )
+
+    fn father_id(&self) -> EntityId {
+        self.father
+            .upgrade()
+            .expect("Father should not quit")
+            .entity_id()
     }
 
-    pub(super) fn input_anchor(&self, port: PortId) -> Point<Pixels> {
+    fn input_count(&self) -> usize {
+        match self.kind {
+            NodeCardKind::Normal { .. } => 1,
+            NodeCardKind::Merge { input_count } => input_count,
+            NodeCardKind::Generator {} => 0,
+        }
+    }
+    pub(super) fn output_anchor(&self, relative: bool) -> Point<Pixels> {
+        let relative_pos = point(px(NODE_WIDTH), px(NODE_HEIGHT / 2.0));
+        if relative {
+            relative_pos
+        } else {
+            relative_pos + point(px(self.pos.0), px(self.pos.1))
+        }
+    }
+
+    pub(super) fn input_anchor(&self, port: PortId, relative: bool) -> Point<Pixels> {
         let count = match self.kind {
             NodeCardKind::Normal {} => 1,
             NodeCardKind::Merge { input_count } => input_count,
@@ -211,7 +230,12 @@ impl NodeCard {
         } else {
             NODE_HEIGHT * (port as f32 + 1.0) / (count as f32 + 1.0)
         };
-        point(px(self.pos.0), px(self.pos.1 + y))
+        let relative_pos = point(px(0.0), px(y));
+        if relative {
+            relative_pos
+        } else {
+            relative_pos + point(px(self.pos.0), px(self.pos.1))
+        }
     }
 }
 
@@ -251,9 +275,7 @@ impl Render for NodeCard {
             .w(px(NODE_WIDTH))
             .h(px(NODE_HEIGHT))
             .rounded(theme.radii.medium)
-            .bg(theme.colors.background.surface)
-            .border_1()
-            .border_color(theme.colors.border.subtle)
+            .bg(theme.colors.background.elevated)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
@@ -262,7 +284,7 @@ impl Render for NodeCard {
                         start_cursor: event.position,
                     };
                     this.edit_state.update(cx, |state, cx| {
-                        state.select_node(Some(this.id), this.nodes_entity_id, cx);
+                        state.select_node(Some(this.id), this.father_id(), cx);
                     });
                     cx.stop_propagation();
                 }),
@@ -286,12 +308,21 @@ impl Render for NodeCard {
             )
             .when(self.selected, |card| {
                 card.child(
-                    Outline::new(px(1.), px(3.))
+                    Outline::new(px(1.5), px(2.5))
                         .color(theme.colors.accent)
                         .radius(theme.radii.medium),
                 )
             })
             .child(Text::new("Nodes").content())
+            .children((0..self.input_count()).map(|port_id| {
+                let mut center = self.input_anchor(port_id, true);
+                center.x = px(0.);
+                render_port(center, &theme)
+            }))
+            .child({
+                let center = self.output_anchor(true);
+                render_port(center, &theme)
+            })
             .child(
                 add_button(format!("add-serial-{}", self.id).into())
                     .right(px(-10.0))
@@ -314,4 +345,14 @@ impl Render for NodeCard {
                 )
             })
     }
+}
+
+pub(super) fn render_port(center: Point<Pixels>, theme: &Theme) -> impl IntoElement {
+    div()
+        .absolute()
+        .left(center.x - px(PORT_SIZE / 2.0))
+        .top(center.y - px(PORT_SIZE / 2.0))
+        .size(px(PORT_SIZE))
+        .rounded_full()
+        .bg(theme.colors.background.inverse)
 }
