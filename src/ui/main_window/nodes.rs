@@ -423,8 +423,8 @@ impl Render for Edge {
     }
 }
 
-pub const NODE_WIDTH: f32 = 160.;
-const NODE_HEIGHT: f32 = 72.;
+const NODE_WIDTH: f32 = 120.;
+const NODE_HEIGHT: f32 = 60.;
 
 struct NodeCard {
     id: NodeId,

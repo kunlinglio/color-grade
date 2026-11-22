@@ -125,18 +125,22 @@ impl Render for MainWindow {
             .child(Text::new(self.path.to_string_lossy()).muted());
         let title_bar = TitleBar::new().child(project_info).child(toggle);
         let library_panel = resizable_panel()
-            .size_range(px(100.)..px(2400.))
+            .size_range(px(100.)..Pixels::MAX)
             .size(px(200.))
             .child(self.library.clone());
-        let monitor_panel = resizable_panel().child(self.monitor.clone());
+        let monitor_panel = resizable_panel()
+            .size_range(px(200.)..Pixels::MAX)
+            .child(self.monitor.clone());
         let nodes_panel = resizable_panel()
-            .size_range(px(200.)..px(2400.))
+            .size_range(px(200.)..Pixels::MAX)
+            .size(px(250.))
             .child(self.nodes.clone());
-        let grading_panel = resizable_panel()
-            .size_range(px(200.)..px(2400.))
+        let inspector_panel = resizable_panel()
+            .size_range(px(200.)..Pixels::MAX)
             .child(self.inspector.clone());
         let scopes_panel = resizable_panel()
-            .size_range(px(200.)..px(2400.))
+            .size_range(px(200.)..Pixels::MAX)
+            .size(px(350.))
             .child(self.scopes.clone());
 
         div()
@@ -156,11 +160,14 @@ impl Render for MainWindow {
                             ),
                         )
                         .child(
-                            resizable_panel().size_range(px(280.)..px(2000.)).child(
-                                v_resizable("right-vertical")
-                                    .child(grading_panel)
-                                    .child(scopes_panel),
-                            ),
+                            resizable_panel()
+                                .size_range(px(280.)..px(2000.))
+                                .size(px(390.))
+                                .child(
+                                    v_resizable("right-vertical")
+                                        .child(inspector_panel)
+                                        .child(scopes_panel),
+                                ),
                         ),
                 ),
             )

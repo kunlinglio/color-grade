@@ -154,7 +154,7 @@ impl Default for Workflow {
                 brightness: 1.0,
                 saturation: 1.0,
             },
-            pos: (1.0, 1.0), // TODO: Calculate more accurate default position
+            pos: (40., 40.),
         }];
         let graph = WorkflowGraph::build(&nodes).expect("default workflow must be a DAG");
         Self {

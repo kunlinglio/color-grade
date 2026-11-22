@@ -1,5 +1,4 @@
 use gpui_kit::base::slider::{SliderEvent, SliderValue};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::*;
@@ -280,13 +279,14 @@ impl Render for Inspector {
         div()
             .v_flex()
             .size_full()
-            .p_4()
-            .gap_4()
+            .p_2()
+            .gap_2()
             .child(Text::new("Inspector").title())
             .child(
                 div() // container for items
                     .size_full()
                     .gap_2()
+                    .p_2()
                     .v_flex()
                     .overflow_y_scrollbar()
                     .map(|container| match &self.mode {
