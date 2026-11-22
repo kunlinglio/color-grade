@@ -1,4 +1,5 @@
 {
+  "rust-analyzer.imports.prefix": "plain",
   "rust-analyzer.imports.granularity.group": "module",
   "rust-analyzer.imports.granularity.enforce": true,
   "colorize.languages": [
