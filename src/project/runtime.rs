@@ -8,8 +8,8 @@ use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
 use rayon::ThreadPool;
 
-use crate::media::comm::MediaSubscription;
-use crate::media::manager::MediaManager;
+use crate::media::MediaManager;
+use crate::media::MediaSubscription;
 use crate::project::session::SessionClient;
 use crate::render::Renderer;
 use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};

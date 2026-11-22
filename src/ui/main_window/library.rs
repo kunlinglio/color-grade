@@ -9,7 +9,7 @@ use gpui_kit::*;
 use strum::EnumIter;
 
 use crate::media;
-use crate::media::media_type::Media;
+use crate::media::Media;
 use crate::project::ProjectRuntimeHandler;
 use crate::thumbnail::{ThumbnailManagerClient, ThumbnailSize};
 use crate::ui::components::{Icon, Loading, ResizeSensitive, SegmentedSelect, SelectOption, Text};
@@ -140,13 +140,13 @@ impl Library {
             }
             while let Some(e) = rx.get().await {
                 match e {
-                    media::comm::Event::Sync(list) => {
+                    media::Event::Sync(list) => {
                         let _ = this.update(cx, |library, cx| {
                             library.media_list.replace(list);
                             cx.notify();
                         });
                     }
-                    media::comm::Event::Add(media) => {
+                    media::Event::Add(media) => {
                         let _ = this.update(cx, |library, cx| {
                             library.media_list.insert_sorted(media);
                             cx.notify();

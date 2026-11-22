@@ -55,16 +55,22 @@ enum MergeMode {
 }
 
 impl MergeMode {
-    fn change_switch_layer_blend(
+    fn layer_blend(&self) -> bool {
+        match self {
+            Self::Mixer => false,
+            Self::LayerBlend { .. } => true,
+        }
+    }
+    fn change_layer_blend(
         &mut self,
         enabled: bool,
         node_id: NodeId,
         cx: &mut Context<Inspector>,
     ) -> Option<WorkflowDiff> {
+        if self.layer_blend() == enabled {
+            return None;
+        }
         if enabled {
-            let Self::Mixer = self else {
-                return None;
-            };
             *self = Self::from_blend_mode(BlendMode::default(), cx);
             Some(WorkflowDiff {
                 payload: WorkflowDiffPayload::NodeAttr(
@@ -73,9 +79,6 @@ impl MergeMode {
                 ),
             })
         } else {
-            let Self::LayerBlend { .. } = self else {
-                return None;
-            };
             *self = Self::Mixer;
             Some(WorkflowDiff {
                 payload: WorkflowDiffPayload::NodeAttr(
@@ -208,7 +211,7 @@ impl InspectorMode {
                     },
                 }
             }
-            NodeKind::Generator { mode } => {
+            NodeKind::Generator { .. } => {
                 todo!()
             }
         }
@@ -319,10 +322,7 @@ impl Render for Inspector {
                             let container = container.child(single_line_item(
                                 "Use Layer Blender",
                                 CheckBox::new("use-layer-blende-mode")
-                                    .when(
-                                        matches!(mode, MergeMode::LayerBlend { .. }),
-                                        |check_box| check_box.select(),
-                                    )
+                                    .when(mode.layer_blend(), |check_box| check_box.select())
                                     .on_change(move |enabled, _window, app| {
                                         let _ = this.update(app, |this, cx| {
                                             let InspectorMode::Merge { mode } = &mut this.mode
@@ -334,8 +334,8 @@ impl Render for Inspector {
                                             else {
                                                 return;
                                             };
-                                            let Some(diff) = mode
-                                                .change_switch_layer_blend(enabled, node_id, cx)
+                                            let Some(diff) =
+                                                mode.change_layer_blend(enabled, node_id, cx)
                                             else {
                                                 return;
                                             };

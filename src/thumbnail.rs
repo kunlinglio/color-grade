@@ -8,8 +8,8 @@ use image::GenericImageView;
 use lru::LruCache;
 use rayon::ThreadPool;
 
-use crate::media::hash::MediaHash;
-use crate::media::media_type::Media;
+use crate::media::Media;
+use crate::media::MediaHash;
 use crate::render::RenderedFrame;
 
 const CACHE_CAPACITY: usize = 128;

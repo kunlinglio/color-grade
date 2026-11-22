@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui_kit::{Context, EntityId, EventEmitter};
 
-use crate::media::media_type::Media;
+use crate::media::Media;
 use crate::project::{NodeId, SessionClient, Workflow, WorkflowDiff, WorkflowDiffPayload};
 
 /// A edit state shared by multiple panel inside mainwindow.
@@ -53,21 +53,12 @@ impl EditState {
         origin: EntityId,
         cx: &mut Context<'_, Self>,
     ) {
-        let previous = if let Self::Opened { media, .. } = self {
-            Some(media.clone())
-        } else {
-            None
-        };
         *self = Self::Opened {
             client,
             media: new.clone(),
             selected_node: None,
         };
-        cx.emit(SessionChanged {
-            origin,
-            previous,
-            current: Some(new),
-        });
+        cx.emit(SessionChanged { origin });
     }
     /// Apply diff to workflow,
     /// returns if the diff validate
@@ -82,12 +73,10 @@ impl EditState {
             EditState::Opened { client, .. } => {
                 client.update_workflow(diff)?;
                 match diff.payload {
-                    WorkflowDiffPayload::NodeAttr(node_id, ..) => {
-                        cx.emit(NodeAttrChanged { node_id, origin });
+                    WorkflowDiffPayload::NodeAttr(..) => {
+                        cx.emit(NodeAttrChanged { origin });
                     }
-                    WorkflowDiffPayload::NodePos(node_id, ..) => {
-                        cx.emit(NodePosChanged { node_id, origin })
-                    }
+                    WorkflowDiffPayload::NodePos(..) => cx.emit(NodePosChanged { origin }),
                     WorkflowDiffPayload::Topology(_) => {
                         cx.emit(WorkflowTopoChanged { origin });
                     }
@@ -134,18 +123,14 @@ pub struct SelectedNodeChanged {
 
 pub struct SessionChanged {
     pub origin: EntityId,
-    pub previous: Option<Arc<Media>>,
-    pub current: Option<Arc<Media>>,
 }
 
 pub struct NodeAttrChanged {
     pub origin: EntityId,
-    pub node_id: NodeId,
 }
 
 pub struct NodePosChanged {
     pub origin: EntityId,
-    pub node_id: NodeId,
 }
 
 pub struct WorkflowTopoChanged {
