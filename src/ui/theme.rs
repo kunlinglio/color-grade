@@ -25,7 +25,7 @@ pub struct Theme {
     pub colors: ColorTheme,
     pub typography: Typography,
     pub radii: Radii,
-    pub border_width: Pixels,
+    pub divider_width: Pixels,
 }
 
 #[derive(Clone, Copy)]
@@ -166,7 +166,7 @@ impl Default for Theme {
                 large: px(8.),
                 panel: px(16.),
             },
-            border_width: px(1.),
+            divider_width: px(2.),
         }
     }
 }

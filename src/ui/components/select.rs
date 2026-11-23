@@ -131,14 +131,13 @@ impl<T: SelectOption> PopupButton<T> {
         self
     }
 
-    fn change(&mut self, value: T, window: &mut Window, cx: &mut Context<Self>) {
-        let changed = self.selected != Some(value);
-        self.selected = Some(value);
+    fn select(&mut self, value: T, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
         cx.notify();
-        if !changed {
+        if self.selected == Some(value) {
             return;
         }
+        self.selected = Some(value);
         if let Some(cb) = self.on_select_changed.as_ref() {
             cb(value, window, cx);
         }
@@ -248,7 +247,7 @@ impl<T: SelectOption> Render for PopupButton<T> {
                                     .bg(theme.colors.accent)
                             })
                             .on_click(move |_event, window, cx| {
-                                this.update(cx, |this, cx| this.change(value, window, cx));
+                                this.update(cx, |this, cx| this.select(value, window, cx));
                             })
                             // .child(div().w(theme.typography.content).flex_none().when(
                             //     is_selected,

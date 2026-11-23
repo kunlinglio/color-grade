@@ -35,8 +35,8 @@ fn divider_handle_appearance() -> base::ResizeHandleRenderer {
                         })
                         .rounded_full()
                         .map(|line| match handle.axis() {
-                            Axis::Horizontal => line.w(px(2.)).h_full().py_2(),
-                            Axis::Vertical => line.h(px(2.)).w_full().px_2(),
+                            Axis::Horizontal => line.w(theme.divider_width).h_full().py_2(),
+                            Axis::Vertical => line.h(theme.divider_width).w_full().px_2(),
                         }),
                 )
                 .into_any_element(),
@@ -68,8 +68,8 @@ fn floating_handle_appearance() -> base::ResizeHandleRenderer {
                         })
                         .rounded_full()
                         .map(|line| match handle.axis() {
-                            Axis::Horizontal => line.w(px(2.)).h_full(),
-                            Axis::Vertical => line.h(px(2.)).w_full(),
+                            Axis::Horizontal => line.w(theme.divider_width).h_full(),
+                            Axis::Vertical => line.h(theme.divider_width).w_full(),
                         }),
                 )
                 .into_any_element(),

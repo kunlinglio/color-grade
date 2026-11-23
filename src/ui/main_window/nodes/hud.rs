@@ -4,8 +4,6 @@ use gpui_kit::*;
 use crate::ui::components::Text;
 use crate::ui::get_theme;
 
-use super::NODES_PADDING;
-
 pub(super) struct NodePosHud {
     pos_info: Option<PosInfo>,
 }

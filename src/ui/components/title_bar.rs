@@ -46,7 +46,6 @@ struct DragState {
 
 impl RenderOnce for TitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = get_theme(cx);
         let drag_state = window.use_state(cx, |_, _| DragState { should_move: false });
 
         // The middle region holds the children; on Windows/Linux it doubles as
