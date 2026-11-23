@@ -4,6 +4,8 @@ use gpui_kit::*;
 use crate::ui::components::Text;
 use crate::ui::get_theme;
 
+use super::NODES_PADDING;
+
 pub(super) struct NodePosHud {
     pos_info: Option<PosInfo>,
 }
@@ -45,10 +47,11 @@ impl Render for NodePosHud {
 
         div()
             .absolute()
-            .left(px(0.))
-            .bottom(px(0.))
+            .right(px(NODES_PADDING))
+            .bottom(px(NODES_PADDING))
             .px_2()
             .py_1()
+            .shadow_lg()
             .rounded(theme.radii.small)
             .bg(theme.colors.background.elevated)
             .child(Text::new(format!("x: {:.1}  y: {:.1}", info.x, info.y,)).content())

@@ -4,6 +4,7 @@ use gpui_kit::base::StyledExt;
 use gpui_kit::base::input::{Input, InputEditorStyle, InputState};
 use gpui_kit::component::spinner::Spinner as BaseSpinner;
 use gpui_kit::component::{Sizable as _, Size as ComponentSize};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::ui::get_theme;
@@ -53,20 +54,22 @@ impl Styled for Text {
 impl RenderOnce for Text {
     fn render(self, _window: &mut Window, app: &mut App) -> impl IntoElement {
         let theme = get_theme(app);
-        let div = div().child(self.content);
-        let div = match self.preset {
-            None => div,
-            Some(TextPreset::Content) => div
-                .text_color(theme.colors.text.secondary)
-                .text_size(theme.typography.content),
-            Some(TextPreset::Title) => div
-                .text_color(theme.colors.text.primary)
-                .text_size(theme.typography.title),
-            Some(TextPreset::Muted) => div
-                .text_color(theme.colors.text.muted)
-                .text_size(theme.typography.content),
-        };
-        div.refine_style(&self.style)
+        div()
+            .child(self.content)
+            .map(|div| match self.preset {
+                None => div,
+                Some(TextPreset::Content) => div
+                    .text_color(theme.colors.text.secondary)
+                    .text_size(theme.typography.content),
+                Some(TextPreset::Title) => div
+                    .text_color(theme.colors.text.primary)
+                    .text_size(theme.typography.title)
+                    .font_bold(),
+                Some(TextPreset::Muted) => div
+                    .text_color(theme.colors.text.muted)
+                    .text_size(theme.typography.content),
+            })
+            .refine_style(&self.style)
     }
 }
 

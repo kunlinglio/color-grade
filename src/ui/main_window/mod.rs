@@ -214,3 +214,12 @@ fn floating_panel(theme: &Theme) -> Div {
         .rounded(theme.radii.panel)
         .bg(theme.colors.background.surface)
 }
+
+fn panel_header() -> Div {
+    div()
+        .flex()
+        .w_full()
+        .px_2()
+        .items_center()
+        .justify_between()
+}

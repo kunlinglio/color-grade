@@ -90,7 +90,7 @@ impl ColorTheme {
         Self {
             background: BackgroundColors {
                 canvas: rgb(0x090909),
-                surface: rgb(0x1f1f1f),
+                surface: rgb(0x1a1a1a),
                 elevated: rgb(0x2a2a2a),
                 selected: rgb(0x343434),
                 inverse: rgb(0xffffff),
@@ -164,7 +164,7 @@ impl Default for Theme {
                 small: px(4.),
                 medium: px(6.),
                 large: px(8.),
-                panel: px(16.),
+                panel: px(12.),
             },
             divider_width: px(2.),
         }

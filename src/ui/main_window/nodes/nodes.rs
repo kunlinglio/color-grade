@@ -7,6 +7,7 @@ use gpui_kit::*;
 use crate::project::{NodeId, NodeKind, Source};
 use crate::ui::components::{ResizeSensitive, Text};
 use crate::ui::get_theme;
+use crate::ui::main_window::panel_header;
 use crate::ui::main_window::state::{self, EditState};
 
 use super::NODES_PADDING;
@@ -262,9 +263,10 @@ impl Render for Nodes {
         let theme = get_theme(cx);
         let this = cx.weak_entity();
         div()
-            .size_full()
             .v_flex()
-            .child(div().w_full().px_3().child(Text::new("Nodes").title()))
+            .size_full()
+            .p_1()
+            .child(panel_header().child(Text::new("Nodes").title()))
             .child(
                 ResizeSensitive::new()
                     .flex_1()

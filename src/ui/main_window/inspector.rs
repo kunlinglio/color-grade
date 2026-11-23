@@ -12,6 +12,8 @@ use crate::ui::components::{
 };
 use crate::ui::main_window::{EditState, state};
 
+use super::panel_header;
+
 impl SelectOption for BlendMode {
     fn id(self) -> &'static str {
         match self {
@@ -260,11 +262,12 @@ impl Render for Inspector {
         div()
             .v_flex()
             .size_full()
-            .p_2()
-            .gap_2()
-            .child(Text::new("Inspector").title())
+            .p_1()
+            .gap_1()
+            .child(panel_header().child(Text::new("Inspector").title()))
             .child(
-                div() // container for items
+                // container for items
+                div()
                     .size_full()
                     .gap_2()
                     .p_2()

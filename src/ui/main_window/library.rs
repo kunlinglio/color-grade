@@ -16,6 +16,8 @@ use crate::ui::components::{Icon, Loading, ResizeSensitive, SegmentedSelect, Sel
 use crate::ui::main_window::{EditState, state};
 use crate::ui::{Theme, get_theme};
 
+use super::panel_header;
+
 /// The constant to control how many thumbnails will be loaded.
 /// prefetched thumbs = PREFETCH_RATIO * number of Visible thumbs
 const PREFETCH_RATIO: f32 = 1.0;
@@ -295,24 +297,18 @@ impl Render for Library {
             .v_flex()
             .size_full()
             .p_1()
+            .gap_1()
             .child(
-                div()
-                    .flex()
-                    .w_full()
-                    .px_2()
-                    .items_center()
-                    .justify_between()
-                    .child(Text::new("Library").title())
-                    .child(
-                        SegmentedSelect::<MediaSortBy>::new()
-                            .select(self.media_list.sort_by)
-                            .on_select(move |sort_by, _window, app| {
-                                let _ = this_for_select.update(app, |this, cx| {
-                                    this.change_sort_by(sort_by);
-                                    cx.notify();
-                                });
-                            }),
-                    ),
+                panel_header().child(Text::new("Library").title()).child(
+                    SegmentedSelect::<MediaSortBy>::new()
+                        .select(self.media_list.sort_by)
+                        .on_select(move |sort_by, _window, app| {
+                            let _ = this_for_select.update(app, |this, cx| {
+                                this.change_sort_by(sort_by);
+                                cx.notify();
+                            });
+                        }),
+                ),
             )
             .child(
                 ResizeSensitive::new()

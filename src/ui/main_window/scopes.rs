@@ -10,6 +10,8 @@ use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
 use crate::ui::components::{ResizeSensitive, SegmentedSelect, SelectOption, Text};
 use crate::ui::get_theme;
 
+use super::panel_header;
+
 #[derive(Clone, Copy, PartialEq, Eq, EnumIter)]
 enum ChosenScope {
     BrightnessHistogram,
@@ -165,28 +167,21 @@ impl Render for Scopes {
         div()
             .v_flex()
             .size_full()
-            .p_2()
-            .gap_1()
+            .p_1()
             .child(
-                div()
-                    .flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .child(Text::new("Scopes").title())
-                    .child(
-                        SegmentedSelect::<ChosenScope>::new()
-                            .select(self.chosen)
-                            .on_select(move |scope, _window, app| {
-                                let _ = this.update(app, |this, cx| {
-                                    this.chosen = scope;
-                                    cx.notify();
-                                });
-                            }),
-                    ),
+                panel_header().child(Text::new("Scopes").title()).child(
+                    SegmentedSelect::<ChosenScope>::new()
+                        .select(self.chosen)
+                        .on_select(move |scope, _window, app| {
+                            let _ = this.update(app, |this, cx| {
+                                this.chosen = scope;
+                                cx.notify();
+                            });
+                        }),
+                ),
             )
             .child(
-                div().v_flex().flex_1().min_h_0().child(
+                div().p_1().v_flex().flex_1().min_h_0().child(
                     ResizeSensitive::new()
                         .v_flex()
                         .w_full()
