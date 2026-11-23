@@ -9,6 +9,8 @@ use strum::IntoEnumIterator;
 use crate::ui::components::{Button, Icon};
 use crate::ui::get_theme;
 
+const MENU_PADDING: Pixels = px(4.);
+
 /// A value that can be an option in a [`SingleSelection`].
 pub trait SelectOption: Copy + PartialEq + IntoEnumIterator + 'static {
     /// The stable id of this option.
@@ -88,11 +90,11 @@ impl<T: SelectOption> RenderOnce for SegmentedSelect<T> {
 pub struct PopupButton<T: SelectOption> {
     selected: Option<T>,
     open: bool,
-    highlighted: usize,
     on_select_changed: Option<Rc<dyn Fn(T, &mut Window, &mut App)>>,
     style: StyleRefinement,
     id: ElementId,
     width: Option<Pixels>,
+    height: Option<Pixels>,
     min_width: Option<Pixels>,
 }
 
@@ -101,13 +103,11 @@ impl<T: SelectOption> PopupButton<T> {
         Self {
             selected,
             open: false,
-            highlighted: selected
-                .and_then(|value| T::iter().position(|option| option == value))
-                .unwrap_or(0),
             on_select_changed: None,
             style: StyleRefinement::default(),
             id: id.into(),
             width: None,
+            height: None,
             min_width: None,
         }
     }
@@ -122,9 +122,6 @@ impl<T: SelectOption> PopupButton<T> {
             return;
         }
         self.selected = value;
-        self.highlighted = value
-            .and_then(|value| T::iter().position(|option| option == value))
-            .unwrap_or(0);
         cx.notify();
     }
 
@@ -135,9 +132,13 @@ impl<T: SelectOption> PopupButton<T> {
     }
 
     fn change(&mut self, value: T, window: &mut Window, cx: &mut Context<Self>) {
+        let changed = self.selected != Some(value);
         self.selected = Some(value);
         self.open = false;
         cx.notify();
+        if !changed {
+            return;
+        }
         if let Some(cb) = self.on_select_changed.as_ref() {
             cb(value, window, cx);
         }
@@ -159,19 +160,15 @@ impl<T: SelectOption> Render for PopupButton<T> {
         let this_for_resize = this.clone();
         let this_for_min_width = this.clone();
         let id = self.id.clone();
+        let trigger_height = self.height.unwrap_or(px(0.));
+        let menu_offset = -(trigger_height + MENU_PADDING);
 
         Popover::new(("popup-button", cx.entity_id()))
             .anchor(Anchor::TopLeft)
-            .offset(px(4.))
+            .offset(menu_offset)
             .open(open)
             .on_open_change(cx.listener(|this, open: &bool, _window, cx| {
                 this.open = *open;
-                if *open {
-                    this.highlighted = this
-                        .selected
-                        .and_then(|value| T::iter().position(|option| option == value))
-                        .unwrap_or(0);
-                }
                 cx.notify();
             }))
             .trigger_with(move |_is_open, _window, cx| {
@@ -192,8 +189,10 @@ impl<T: SelectOption> Render for PopupButton<T> {
                         }
                     })
                     .on_prepaint(move |bounds, _window, app| {
-                        this_for_resize
-                            .update(app, |this, _cx| this.width = Some(bounds.size.width))
+                        this_for_resize.update(app, |this, _cx| {
+                            this.width = Some(bounds.size.width);
+                            this.height = Some(bounds.size.height);
+                        })
                     })
                     .child(
                         Icon::new(IconName::ChevronsUpDown)
@@ -212,22 +211,18 @@ impl<T: SelectOption> Render for PopupButton<T> {
             })
             .content(move |_popover, _window, cx| {
                 let selected = this.read(cx).selected;
-                let highlighted = this.read(cx).highlighted;
 
                 div()
                     .v_flex()
                     .id("popup-button-menu")
-                    .p_1()
+                    .p(MENU_PADDING)
                     .w(this.read(cx).width.unwrap_or(px(200.)))
                     .overflow_y_scroll()
                     .bg(theme.colors.background.elevated)
                     .rounded(theme.radii.large)
-                    .shadow(vec![
-                        BoxShadow::new(px(0.), px(8.), hsla(0., 0., 0., 0.28))
-                            .blur_radius(px(24.))
-                            .spread_radius(px(-4.)),
-                    ])
-                    .children(T::iter().enumerate().map(|(ix, value)| {
+                    .shadow_lg()
+                    .gap_1()
+                    .children(T::iter().map(|value| {
                         let this = this.clone();
                         let is_selected = selected == Some(value);
 
@@ -238,27 +233,33 @@ impl<T: SelectOption> Render for PopupButton<T> {
                             .items_center()
                             .px_1()
                             .cursor_pointer()
-                            .rounded(theme.radii.small)
+                            .rounded(theme.radii.medium)
                             .text_color(theme.colors.text.secondary)
-                            .when(ix == highlighted, |element| {
-                                element.bg(theme.colors.interactive.hover)
+                            .hover(|element| {
+                                if !is_selected {
+                                    element.bg(theme.colors.interactive.hover)
+                                } else {
+                                    element
+                                }
                             })
                             .when(is_selected, |element| {
-                                element.text_color(theme.colors.text.primary)
+                                element
+                                    .text_color(theme.colors.text.primary)
+                                    .bg(theme.colors.accent)
                             })
                             .on_click(move |_event, window, cx| {
                                 this.update(cx, |this, cx| this.change(value, window, cx));
                             })
-                            .child(div().w(theme.typography.content).flex_none().when(
-                                is_selected,
-                                |element| {
-                                    element.child(
-                                        Icon::new(IconName::Check)
-                                            .text_color(theme.colors.text.primary)
-                                            .size(theme.typography.content),
-                                    )
-                                },
-                            ))
+                            // .child(div().w(theme.typography.content).flex_none().when(
+                            //     is_selected,
+                            //     |element| {
+                            //         element.child(
+                            //             Icon::new(IconName::Check)
+                            //                 .text_color(theme.colors.text.primary)
+                            //                 .size(theme.typography.content),
+                            //         )
+                            //     },
+                            // ))
                             .child(
                                 div()
                                     .flex_1()

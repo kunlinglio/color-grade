@@ -105,9 +105,9 @@ impl ColorTheme {
                 subtle: rgb(0x2f2f33),
             },
             interactive: InteractiveColors {
-                hover: rgb(0x1f1f1f),
-                active: rgb(0x2a2a2a),
-                selected_hover_and_active: rgb(0x3a3a3a),
+                hover: rgb(0x323232),
+                active: rgb(0x3a3a3a),
+                selected_hover_and_active: rgb(0x3f3f3f),
                 inverse_hover: rgb(0xe6e6e6),
                 inverse_active: rgb(0xd4d4d4),
             },

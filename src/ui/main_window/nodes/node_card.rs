@@ -275,6 +275,7 @@ impl Render for NodeCard {
             .w(px(NODE_WIDTH))
             .h(px(NODE_HEIGHT))
             .rounded(theme.radii.medium)
+            .shadow_lg()
             .bg(theme.colors.background.elevated)
             .on_mouse_down(
                 MouseButton::Left,

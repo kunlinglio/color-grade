@@ -148,7 +148,7 @@ impl Render for MainWindow {
             .child(title_bar)
             // Body
             .child(
-                div().flex_1().p_1().pt_0().child(
+                div().flex_1().min_h_0().p_1().pt_0().child(
                     h_floating_resizable("main-horizontal")
                         // Left: Library panel
                         .child(
