@@ -264,7 +264,7 @@ impl Render for Nodes {
         div()
             .size_full()
             .v_flex()
-            .child(Text::new("Nodes").title())
+            .child(div().w_full().px_3().child(Text::new("Nodes").title()))
             .child(
                 ResizeSensitive::new()
                     .flex_1()

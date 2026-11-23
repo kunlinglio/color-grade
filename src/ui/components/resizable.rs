@@ -12,31 +12,33 @@ use crate::ui::get_theme;
 fn divider_handle_appearance() -> base::ResizeHandleRenderer {
     Rc::new(|handle, _window, cx| {
         let theme = get_theme(cx);
-        let color: Hsla = match handle.state() {
-            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
-                theme.colors.border.subtle.into()
-            }
-            base::ResizeHandleState::Pressed | base::ResizeHandleState::Dragging => {
-                theme.colors.accent.into()
-            }
-        };
-
-        let line = div()
-            .flex_none()
-            .bg(color)
-            .rounded_full()
-            .map(|line| match handle.axis() {
-                Axis::Horizontal => line.w(px(2.)).h_full().py_2(),
-                Axis::Vertical => line.h(px(2.)).w_full().px_2(),
-            });
-
         Some(
+            // A wrapper to make displayed line slightly shorter
             div()
                 .size_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(line)
+                .map(|wrapper| match handle.axis() {
+                    Axis::Horizontal => wrapper.py_3(),
+                    Axis::Vertical => wrapper.px_3(),
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .bg(match handle.state() {
+                            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
+                                theme.colors.border.subtle
+                            }
+                            base::ResizeHandleState::Pressed
+                            | base::ResizeHandleState::Dragging => theme.colors.accent,
+                        })
+                        .rounded_full()
+                        .map(|line| match handle.axis() {
+                            Axis::Horizontal => line.w(px(2.)).h_full().py_2(),
+                            Axis::Vertical => line.h(px(2.)).w_full().px_2(),
+                        }),
+                )
                 .into_any_element(),
         )
     })
@@ -48,31 +50,28 @@ fn divider_handle_appearance() -> base::ResizeHandleRenderer {
 fn floating_handle_appearance() -> base::ResizeHandleRenderer {
     Rc::new(|handle, _window, cx| {
         let theme = get_theme(cx);
-        let color: Hsla = match handle.state() {
-            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
-                transparent_black().into()
-            }
-            base::ResizeHandleState::Pressed | base::ResizeHandleState::Dragging => {
-                theme.colors.accent.into()
-            }
-        };
-
-        let line = div()
-            .flex_none()
-            .bg(color)
-            .rounded_full()
-            .map(|line| match handle.axis() {
-                Axis::Horizontal => line.w(px(2.)).h_full(),
-                Axis::Vertical => line.h(px(2.)).w_full(),
-            });
-
         Some(
             div()
                 .size_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(line)
+                .child(
+                    div()
+                        .flex_none()
+                        .bg(match handle.state() {
+                            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
+                                transparent_black()
+                            }
+                            base::ResizeHandleState::Pressed
+                            | base::ResizeHandleState::Dragging => theme.colors.accent.into(),
+                        })
+                        .rounded_full()
+                        .map(|line| match handle.axis() {
+                            Axis::Horizontal => line.w(px(2.)).h_full(),
+                            Axis::Vertical => line.h(px(2.)).w_full(),
+                        }),
+                )
                 .into_any_element(),
         )
     })
@@ -88,6 +87,10 @@ pub fn v_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
 
 pub fn h_floating_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
     gpui_kit::base::h_resizable(id).with_handle_appearance(floating_handle_appearance())
+}
+
+pub fn v_floating_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
+    gpui_kit::base::v_resizable(id).with_handle_appearance(floating_handle_appearance())
 }
 
 #[derive(IntoElement)]
