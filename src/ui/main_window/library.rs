@@ -294,10 +294,12 @@ impl Render for Library {
         div()
             .v_flex()
             .size_full()
+            .p_1()
             .child(
                 div()
                     .flex()
                     .w_full()
+                    .px_2()
                     .items_center()
                     .justify_between()
                     .child(Text::new("Library").title())

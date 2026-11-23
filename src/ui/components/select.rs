@@ -177,7 +177,7 @@ impl<T: SelectOption> Render for PopupButton<T> {
             .trigger_with(move |_is_open, _window, cx| {
                 let this = this_for_min_width;
                 Button::new(id)
-                    .bg(theme.colors.background.surface)
+                    .bg(theme.colors.background.elevated)
                     .p_1()
                     .flex()
                     .justify_start()
@@ -220,7 +220,7 @@ impl<T: SelectOption> Render for PopupButton<T> {
                     .p_1()
                     .w(this.read(cx).width.unwrap_or(px(200.)))
                     .overflow_y_scroll()
-                    .bg(theme.colors.background.surface)
+                    .bg(theme.colors.background.elevated)
                     .rounded(theme.radii.large)
                     .shadow(vec![
                         BoxShadow::new(px(0.), px(8.), hsla(0., 0., 0., 0.28))

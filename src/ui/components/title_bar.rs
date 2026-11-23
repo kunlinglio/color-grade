@@ -6,7 +6,7 @@ use gpui_kit::*;
 use crate::ui::components::Icon;
 use crate::ui::get_theme;
 
-const TITLE_BAR_HEIGHT: Pixels = px(32.);
+const TITLE_BAR_HEIGHT: Pixels = px(30.);
 const MACOS_LEFT_PADDING: Pixels = px(80.);
 const OTHER_LEFT_PADDING: Pixels = px(12.);
 /// Width of a single minimize / maximize / close button on Windows and Linux.
@@ -72,8 +72,6 @@ impl RenderOnce for TitleBar {
                 OTHER_LEFT_PADDING
             })
             .flex_shrink_0()
-            .border_b_1()
-            .border_color(theme.colors.border.subtle)
             .refine_style(&self.style);
 
         if cfg!(target_os = "macos") {

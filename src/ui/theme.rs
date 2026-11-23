@@ -68,6 +68,7 @@ pub struct Radii {
     pub small: Pixels,
     pub medium: Pixels,
     pub large: Pixels,
+    pub panel: Pixels,
 }
 
 /// Neutral interaction fills shared by controls such as buttons and segmented
@@ -89,9 +90,9 @@ impl ColorTheme {
         Self {
             background: BackgroundColors {
                 canvas: rgb(0x090909),
-                surface: rgb(0x181818),
-                elevated: rgb(0x272727),
-                selected: rgb(0x2f2f2f),
+                surface: rgb(0x1f1f1f),
+                elevated: rgb(0x2a2a2a),
+                selected: rgb(0x343434),
                 inverse: rgb(0xffffff),
             },
             text: TextColors {
@@ -163,6 +164,7 @@ impl Default for Theme {
                 small: px(4.),
                 medium: px(6.),
                 large: px(8.),
+                panel: px(16.),
             },
             border_width: px(1.),
         }

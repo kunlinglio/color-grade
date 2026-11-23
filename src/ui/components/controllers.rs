@@ -267,12 +267,12 @@ impl RenderOnce for CheckBox {
                     .bg(if checked {
                         theme.colors.accent
                     } else {
-                        theme.colors.background.surface
+                        theme.colors.background.elevated
                     })
                     .border_color(if checked {
-                        theme.colors.accent
+                        theme.colors.accent.into()
                     } else {
-                        theme.colors.background.surface
+                        transparent_black()
                     })
                     .hover(move |style| {
                         style.bg(if checked {

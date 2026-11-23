@@ -13,7 +13,7 @@ use gpui_kit::*;
 use crate::app::ColorGradeApp;
 use crate::project::ProjectRuntimeHandler;
 use crate::ui::components::{
-    Button, Icon, Text, TitleBar, h_resizable, resizable_panel, v_resizable,
+    Button, Icon, Text, TitleBar, h_floating_resizable, resizable_panel, v_resizable,
 };
 use crate::ui::main_window::state::EditState;
 use crate::ui::theme::ColorTheme;
@@ -87,7 +87,7 @@ impl MainWindow {
             titlebar: Some(TitlebarOptions {
                 title: Some("Color Grade".into()),
                 appears_transparent: true,
-                traffic_light_position: Some(point(px(9.), px(7.))),
+                traffic_light_position: Some(point(px(9.), px(9.))),
             }),
             app_owns_titlebar_drag: true,
             ..Default::default()
@@ -133,7 +133,14 @@ impl Render for MainWindow {
         let library_panel = resizable_panel()
             .size_range(px(100.)..Pixels::MAX)
             .size(px(200.))
-            .child(self.library.clone());
+            .child(
+                div()
+                    .size_full()
+                    .overflow_hidden()
+                    .rounded(theme.radii.panel)
+                    .bg(theme.colors.background.surface)
+                    .child(self.library.clone()),
+            );
         let monitor_panel = resizable_panel()
             .size_range(px(200.)..Pixels::MAX)
             .child(self.monitor.clone());
@@ -155,24 +162,34 @@ impl Render for MainWindow {
             .bg(theme.colors.background.canvas)
             .child(title_bar)
             .child(
-                div().flex_1().min_h_0().child(
-                    h_resizable("main-horizontal")
+                div().flex_1().min_h_0().p_1().pt_0().child(
+                    h_floating_resizable("main-horizontal")
+                        // Left: Library panel
                         .child(library_panel)
+                        // Middle: Monitor panel and Nodes panel
                         .child(
-                            resizable_panel().child(
+                            resizable_panel().p_2().child(
                                 v_resizable("middle-vertical")
                                     .child(monitor_panel)
                                     .child(nodes_panel),
                             ),
                         )
+                        // Right: Inspector panel and Scope panel
                         .child(
                             resizable_panel()
                                 .size_range(px(280.)..px(2000.))
                                 .size(px(390.))
                                 .child(
-                                    v_resizable("right-vertical")
-                                        .child(inspector_panel)
-                                        .child(scopes_panel),
+                                    div()
+                                        .size_full()
+                                        .overflow_hidden()
+                                        .rounded(theme.radii.panel)
+                                        .bg(theme.colors.background.surface)
+                                        .child(
+                                            v_resizable("right-vertical")
+                                                .child(inspector_panel)
+                                                .child(scopes_panel),
+                                        ),
                                 ),
                         ),
                 ),

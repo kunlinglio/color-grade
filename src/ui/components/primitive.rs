@@ -311,7 +311,7 @@ impl RenderOnce for TextInput {
             .h(px(24.))
             .px_2()
             .rounded(theme.radii.small)
-            .bg(theme.colors.background.surface)
+            .bg(theme.colors.background.elevated)
             .border_1()
             .border_color(if focused {
                 theme.colors.accent.into()

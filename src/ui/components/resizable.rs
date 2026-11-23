@@ -6,24 +6,73 @@ use gpui_kit::*;
 
 use crate::ui::get_theme;
 
-fn handle_appearance() -> base::ResizeHandleRenderer {
+/// The handle used for divider.
+/// When idle: Show a grew divider line,
+/// When hover: Show line with accent color
+fn divider_handle_appearance() -> base::ResizeHandleRenderer {
     Rc::new(|handle, _window, cx| {
         let theme = get_theme(cx);
-        let axis = handle.axis();
+        let color: Hsla = match handle.state() {
+            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
+                theme.colors.border.subtle.into()
+            }
+            base::ResizeHandleState::Pressed | base::ResizeHandleState::Dragging => {
+                theme.colors.accent.into()
+            }
+        };
+
+        let line = div()
+            .flex_none()
+            .bg(color)
+            .rounded_full()
+            .map(|line| match handle.axis() {
+                Axis::Horizontal => line.w(px(2.)).h_full().py_2(),
+                Axis::Vertical => line.h(px(2.)).w_full().px_2(),
+            });
 
         Some(
             div()
-                .flex_none()
+                .size_full()
                 .flex()
-                .bg(theme.colors.border.subtle)
-                .map(|l| match axis {
-                    Axis::Horizontal => l.w(theme.border_width).h_full().items_center(),
-                    _ => l
-                        .h(theme.border_width)
-                        .w_full()
-                        .items_start()
-                        .justify_center(),
-                })
+                .items_center()
+                .justify_center()
+                .child(line)
+                .into_any_element(),
+        )
+    })
+}
+
+/// The handle used for floating panel.
+/// When idle: Show a grew divider line,
+/// When hover: Show line with accent color
+fn floating_handle_appearance() -> base::ResizeHandleRenderer {
+    Rc::new(|handle, _window, cx| {
+        let theme = get_theme(cx);
+        let color: Hsla = match handle.state() {
+            base::ResizeHandleState::Idle | base::ResizeHandleState::Hovered => {
+                transparent_black().into()
+            }
+            base::ResizeHandleState::Pressed | base::ResizeHandleState::Dragging => {
+                theme.colors.accent.into()
+            }
+        };
+
+        let line = div()
+            .flex_none()
+            .bg(color)
+            .rounded_full()
+            .map(|line| match handle.axis() {
+                Axis::Horizontal => line.w(px(2.)).h_full(),
+                Axis::Vertical => line.h(px(2.)).w_full(),
+            });
+
+        Some(
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(line)
                 .into_any_element(),
         )
     })
@@ -33,12 +82,12 @@ pub fn resizable_panel() -> ResizablePanel {
     gpui_kit::base::resizable_panel()
 }
 
-pub fn h_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
-    gpui_kit::base::h_resizable(id).with_handle_appearance(handle_appearance())
+pub fn v_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
+    gpui_kit::base::v_resizable(id).with_handle_appearance(divider_handle_appearance())
 }
 
-pub fn v_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
-    gpui_kit::base::v_resizable(id).with_handle_appearance(handle_appearance())
+pub fn h_floating_resizable(id: impl Into<ElementId>) -> base::ResizablePanelGroup {
+    gpui_kit::base::h_resizable(id).with_handle_appearance(floating_handle_appearance())
 }
 
 #[derive(IntoElement)]

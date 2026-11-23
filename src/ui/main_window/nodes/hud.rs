@@ -47,8 +47,8 @@ impl Render for NodePosHud {
 
         div()
             .absolute()
-            .left(px(NODES_PADDING))
-            .bottom(px(NODES_PADDING))
+            .left(px(0.))
+            .bottom(px(0.))
             .px_2()
             .py_1()
             .rounded(theme.radii.small)
