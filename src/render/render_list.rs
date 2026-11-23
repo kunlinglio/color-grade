@@ -30,10 +30,17 @@ pub struct RenderList {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Default)]
 pub enum BlendMode {
+    /// Put fg above bg
     #[default]
-    Top,
-    Bottom,
-    // TODO: Add more blend mode
+    Normal,
+    Add,
+    Subtract,
+    Multiply,
+    Screen,
+    Overlay,
+    Difference,
+    Darken,
+    Lighten,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -15,14 +15,28 @@ use crate::ui::main_window::{EditState, state};
 impl SelectOption for BlendMode {
     fn id(self) -> &'static str {
         match self {
-            BlendMode::Top => "blend-mode-top",
-            BlendMode::Bottom => "blend-mode-bottom",
+            BlendMode::Normal => "blend-mode-normal",
+            BlendMode::Add => "blend-mode-add",
+            BlendMode::Subtract => "blend-mode-subtract",
+            BlendMode::Multiply => "blend-mode-multiply",
+            BlendMode::Screen => "blend-mode-screen",
+            BlendMode::Overlay => "blend-mode-overlay",
+            BlendMode::Difference => "blend-mode-difference",
+            BlendMode::Darken => "blend-mode-darken",
+            BlendMode::Lighten => "blend-mode-lighten",
         }
     }
     fn display(self) -> impl IntoElement {
         match self {
-            BlendMode::Top => Text::new("Top").content(),
-            BlendMode::Bottom => Text::new("Bottom").content(),
+            BlendMode::Normal => Text::new("Normal").content(),
+            BlendMode::Add => Text::new("Add").content(),
+            BlendMode::Subtract => Text::new("Subtract").content(),
+            BlendMode::Multiply => Text::new("Multiply").content(),
+            BlendMode::Screen => Text::new("Screen").content(),
+            BlendMode::Overlay => Text::new("Overlay").content(),
+            BlendMode::Difference => Text::new("Difference").content(),
+            BlendMode::Darken => Text::new("Darken").content(),
+            BlendMode::Lighten => Text::new("Lighten").content(),
         }
     }
 }

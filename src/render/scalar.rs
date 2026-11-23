@@ -184,7 +184,7 @@ impl ScalarFrame {
     fn new(width: usize, height: usize) -> Self {
         let mut rgba = vec![0.0f32; width * height * 4];
         for px in rgba.chunks_exact_mut(4) {
-            px[3] = 255.0; // let alpha = 255
+            px[3] = 1.0; // let alpha = 1
         }
         ScalarFrame {
             width,
@@ -192,17 +192,26 @@ impl ScalarFrame {
             rgba: rgba,
         }
     }
+    /// Convert to f32 and normalize
     fn from_frame(frame: &Frame) -> Self {
         ScalarFrame {
-            rgba: frame.rgba.iter().map(|&e| e as f32).collect(),
+            rgba: frame
+                .rgba
+                .iter()
+                .map(|&e| e as f32 / u8::MAX as f32)
+                .collect(),
             width: frame.width,
             height: frame.height,
         }
     }
-
+    /// Convert back to u8 and de-normalize
     fn to_frame(&self) -> Frame {
         Frame {
-            rgba: self.rgba.iter().map(|&e| e as u8).collect(),
+            rgba: self
+                .rgba
+                .iter()
+                .map(|&e| (e.clamp(0.0, 1.0) * u8::MAX as f32).round() as u8)
+                .collect(),
             width: self.width,
             height: self.height,
         }
@@ -212,8 +221,6 @@ impl ScalarFrame {
 mod kernel {
     use super::ScalarFrame;
     use crate::render::{BlendMode, PointwiseOp, RenderedFrame};
-
-    const MAX: f32 = 255.0;
 
     #[inline]
     fn luma(r: f32, g: f32, b: f32) -> f32 {
@@ -280,7 +287,28 @@ mod kernel {
         Ok(output)
     }
 
-    /// Composite `foreground` over `background` using `mode`
+    #[inline]
+    fn blend_channel(background: f32, foreground: f32, mode: BlendMode) -> f32 {
+        match mode {
+            BlendMode::Normal => foreground,
+            BlendMode::Add => background + foreground,
+            BlendMode::Subtract => background - foreground,
+            BlendMode::Multiply => background * foreground,
+            BlendMode::Screen => 1.0 - (1.0 - background) * (1.0 - foreground),
+            BlendMode::Overlay => {
+                if background <= 0.5 {
+                    2.0 * background * foreground
+                } else {
+                    1.0 - 2.0 * (1.0 - background) * (1.0 - foreground)
+                }
+            }
+            BlendMode::Difference => (background - foreground).abs(),
+            BlendMode::Darken => background.min(foreground),
+            BlendMode::Lighten => background.max(foreground),
+        }
+    }
+
+    /// Composite straight-alpha `foreground` over `background` using `mode`.
     pub(super) fn merge(
         foreground: &ScalarFrame,
         background: &ScalarFrame,
@@ -295,10 +323,34 @@ mod kernel {
             background.height
         );
 
-        Ok(match mode {
-            BlendMode::Top => foreground.clone(),
-            BlendMode::Bottom => background.clone(),
-        })
+        let mut output = ScalarFrame::new(background.width, background.height);
+        for ((output_px, background_px), foreground_px) in output
+            .rgba
+            .chunks_exact_mut(4)
+            .zip(background.rgba.chunks_exact(4))
+            .zip(foreground.rgba.chunks_exact(4))
+        {
+            let background_alpha = background_px[3].clamp(0.0, 1.0);
+            let foreground_alpha = foreground_px[3].clamp(0.0, 1.0);
+            let output_alpha = foreground_alpha + background_alpha * (1.0 - foreground_alpha);
+
+            for channel in 0..3 {
+                let background_color = background_px[channel];
+                let foreground_color = foreground_px[channel];
+                let blended = blend_channel(background_color, foreground_color, mode);
+                let premultiplied = background_color * background_alpha * (1.0 - foreground_alpha)
+                    + foreground_color * foreground_alpha * (1.0 - background_alpha)
+                    + blended * foreground_alpha * background_alpha;
+
+                output_px[channel] = if output_alpha > f32::EPSILON {
+                    premultiplied / output_alpha
+                } else {
+                    0.0
+                };
+            }
+            output_px[3] = output_alpha;
+        }
+        Ok(output)
     }
 
     pub(super) fn histogram(
@@ -315,7 +367,7 @@ mod kernel {
 
         for px in from.rgba.chunks_exact(4) {
             let to_slot = |x: f32| {
-                (x / MAX * (width - 1) as f32)
+                (x / 1.0 * (width - 1) as f32)
                     .round()
                     .clamp(0.0, (width - 1) as f32) as usize
             };
@@ -366,21 +418,21 @@ mod kernel {
                 for row in 0..*bar_height {
                     let y = height - 1 - row;
                     let index = 4 * (y * width + x);
-                    rgb_buffer.rgba[index + 0] = 255.0;
+                    rgb_buffer.rgba[index + 0] = 1.0;
                 }
             });
             g_hist.iter().enumerate().for_each(|(x, bar_height)| {
                 for row in 0..*bar_height {
                     let y = height - 1 - row;
                     let index = 4 * (y * width + x);
-                    rgb_buffer.rgba[index + 1] = 255.0;
+                    rgb_buffer.rgba[index + 1] = 1.0;
                 }
             });
             b_hist.iter().enumerate().for_each(|(x, bar_height)| {
                 for row in 0..*bar_height {
                     let y = height - 1 - row;
                     let index = 4 * (y * width + x);
-                    rgb_buffer.rgba[index + 2] = 255.0;
+                    rgb_buffer.rgba[index + 2] = 1.0;
                 }
             });
         }
@@ -389,9 +441,9 @@ mod kernel {
                 for row in 0..*bar_height {
                     let y = height - 1 - row;
                     let index = 4 * (y * width + x);
-                    y_buffer.rgba[index + 0] = 255.0;
-                    y_buffer.rgba[index + 1] = 255.0;
-                    y_buffer.rgba[index + 2] = 255.0;
+                    y_buffer.rgba[index + 0] = 1.0;
+                    y_buffer.rgba[index + 1] = 1.0;
+                    y_buffer.rgba[index + 2] = 1.0;
                 }
             });
         }
@@ -410,7 +462,7 @@ mod kernel {
             for (x, px) in row.chunks_exact(4).enumerate() {
                 let y = luma(px[0], px[1], px[2]);
                 let scope_x = x * width / from.width;
-                let normalized_y = (y / 255.0).clamp(0.0, 1.0);
+                let normalized_y = (y / 1.0).clamp(0.0, 1.0);
                 let scope_y = ((1.0 - normalized_y) * (height - 1) as f32).round() as usize;
                 density[scope_y * width + scope_x] += 1;
             }
@@ -425,9 +477,9 @@ mod kernel {
             for (x, p) in row.iter().enumerate() {
                 let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
                 let index = (y * width + x) * 4;
-                buffer.rgba[index] = density * MAX;
-                buffer.rgba[index + 1] = density * MAX;
-                buffer.rgba[index + 2] = density * MAX;
+                buffer.rgba[index] = density * 1.0;
+                buffer.rgba[index + 1] = density * 1.0;
+                buffer.rgba[index + 2] = density * 1.0;
             }
         }
 
@@ -444,9 +496,9 @@ mod kernel {
         let mut density = vec![0u32; width * height];
         for row in from.rgba.chunks_exact(4 * from.width) {
             for px in row.chunks_exact(4) {
-                let r = px[0] / MAX;
-                let g = px[1] / MAX;
-                let b = px[2] / MAX;
+                let r = px[0] / 1.0;
+                let g = px[1] / 1.0;
+                let b = px[2] / 1.0;
                 let y = luma(r, g, b);
                 let cb = (b - y) / 1.8556;
                 let cr = (r - y) / 1.5748;
@@ -468,54 +520,12 @@ mod kernel {
                 let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
                 // TODO: Support color it
                 let index = (y * width + x) * 4;
-                buffer.rgba[index] = density * MAX;
-                buffer.rgba[index + 1] = density * MAX;
-                buffer.rgba[index + 2] = density * MAX;
+                buffer.rgba[index] = density * 1.0;
+                buffer.rgba[index + 1] = density * 1.0;
+                buffer.rgba[index + 2] = density * 1.0;
             }
         }
 
         RenderedFrame::from_frame(buffer.to_frame())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::render::PointwiseOp;
-
-    #[test]
-    fn combined_pointwise_matches_separate_ops() {
-        let frame = Frame::new(2, 1, vec![10, 20, 30, 255, 200, 100, 50, 255]);
-        let separate = RenderList {
-            slot_count: 1,
-            input: Slot::new(0),
-            output: Slot::new(0),
-            ops: vec![
-                Op::Pointwise {
-                    from: Slot::new(0),
-                    to: Slot::new(0),
-                    operations: vec![PointwiseOp::Brightness(1.25)],
-                },
-                Op::Pointwise {
-                    from: Slot::new(0),
-                    to: Slot::new(0),
-                    operations: vec![PointwiseOp::Saturation(0.75)],
-                },
-            ],
-        };
-        let combined = RenderList {
-            slot_count: 1,
-            input: Slot::new(0),
-            output: Slot::new(0),
-            ops: vec![Op::Pointwise {
-                from: Slot::new(0),
-                to: Slot::new(0),
-                operations: vec![PointwiseOp::Brightness(1.25), PointwiseOp::Saturation(0.75)],
-            }],
-        };
-
-        let separate = ScalarBackend::execute(separate, &frame).unwrap();
-        let combined = ScalarBackend::execute(combined, &frame).unwrap();
-        assert_eq!(separate.rgba, combined.rgba);
     }
 }

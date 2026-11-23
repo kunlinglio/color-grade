@@ -466,8 +466,15 @@ impl fmt::Display for IR {
                 }
                 IRInstruction::Merge { mode, .. } => {
                     match mode {
-                        BlendMode::Top => write!(f, "merge.top")?,
-                        BlendMode::Bottom => write!(f, "merge.bottom")?,
+                        BlendMode::Normal => write!(f, "merge.normal")?,
+                        BlendMode::Add => write!(f, "merge.add")?,
+                        BlendMode::Subtract => write!(f, "merge.subtract")?,
+                        BlendMode::Multiply => write!(f, "merge.multiply")?,
+                        BlendMode::Screen => write!(f, "merge.screen")?,
+                        BlendMode::Overlay => write!(f, "merge.overlay")?,
+                        BlendMode::Difference => write!(f, "merge.difference")?,
+                        BlendMode::Darken => write!(f, "merge.darken")?,
+                        BlendMode::Lighten => write!(f, "merge.lighten")?,
                     }
                     true
                 }
