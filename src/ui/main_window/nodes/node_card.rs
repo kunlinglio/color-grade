@@ -106,34 +106,6 @@ impl NodeCard {
         }
     }
 
-    fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
-        let cur_cursor = event.event.position;
-        let DragState::Dragging {
-            start_pos,
-            start_cursor,
-        } = &mut self.drag
-        else {
-            return;
-        };
-        let target_pos = (
-            start_pos.0 + f32::from(cur_cursor.x - start_cursor.x),
-            start_pos.1 + f32::from(cur_cursor.y - start_cursor.y),
-        );
-        self.pos = self.clamp_pos(target_pos, cx);
-        if let Some(hud) = &mut self.pos_hud.upgrade() {
-            hud.update(cx, |this, cx| {
-                this.update(
-                    cx,
-                    PosInfo {
-                        x: self.pos.0,
-                        y: self.pos.1,
-                    },
-                );
-            })
-        }
-        cx.notify();
-    }
-
     fn clamp_pos(&self, target: (f32, f32), cx: &mut Context<Self>) -> (f32, f32) {
         let size = self
             .father
@@ -182,6 +154,34 @@ impl NodeCard {
         {
             warn!("Failed to add parallel node: {error:#}");
         }
+    }
+
+    fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
+        let cur_cursor = event.event.position;
+        let DragState::Dragging {
+            start_pos,
+            start_cursor,
+        } = &mut self.drag
+        else {
+            return;
+        };
+        let target_pos = (
+            start_pos.0 + f32::from(cur_cursor.x - start_cursor.x),
+            start_pos.1 + f32::from(cur_cursor.y - start_cursor.y),
+        );
+        self.pos = self.clamp_pos(target_pos, cx);
+        if let Some(hud) = &mut self.pos_hud.upgrade() {
+            hud.update(cx, |this, cx| {
+                this.update(
+                    cx,
+                    PosInfo {
+                        x: self.pos.0,
+                        y: self.pos.1,
+                    },
+                );
+            })
+        }
+        cx.notify();
     }
 
     fn drag_finish(&mut self, cx: &mut Context<Self>) {

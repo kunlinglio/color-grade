@@ -37,7 +37,7 @@ impl RenderedFrame {
         Self::from_rgba(frame.width, frame.height, frame.rgba)
     }
     /// Return (width, height)
-    pub fn _size(&self) -> (usize, usize) {
+    pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 }
