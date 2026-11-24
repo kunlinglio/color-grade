@@ -96,7 +96,7 @@ impl Render for Edge {
         let top = fy.min(ty);
         let width = (tx - fx).abs().max(1.0);
         let height = (ty - fy).abs().max(1.0);
-        let color = theme.colors.text.muted;
+        let color = theme.colors.text.secondary;
 
         div()
             .absolute()
@@ -117,7 +117,7 @@ impl Render for Edge {
                             px(ty - top) + bounds.origin.y,
                         );
 
-                        let mut builder = PathBuilder::stroke(px(1.5));
+                        let mut builder = PathBuilder::stroke(px(2.));
                         builder.move_to(from);
                         builder.line_to(to);
                         if let Ok(path) = builder.build() {

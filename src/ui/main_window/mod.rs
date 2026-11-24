@@ -153,13 +153,14 @@ impl Render for MainWindow {
                         // Left: Library panel
                         .child(
                             resizable_panel()
+                                .pr_0p5()
                                 .size_range(px(100.)..Pixels::MAX)
                                 .size(px(200.))
                                 .child(floating_panel(&theme).child(self.library.clone())),
                         )
                         // Middle: Monitor panel and Nodes panel
                         .child(
-                            resizable_panel().px_1().child(
+                            resizable_panel().px_0p5().child(
                                 v_floating_resizable("middle-vertical")
                                     // Monitor panel
                                     .child(
@@ -181,6 +182,7 @@ impl Render for MainWindow {
                         // Right: Inspector panel and Scope panel
                         .child(
                             resizable_panel()
+                                .pl_0p5()
                                 .size_range(px(280.)..px(2000.))
                                 .size(px(390.))
                                 .child(

@@ -12,9 +12,6 @@ use crate::ui::{Theme, get_theme};
 use super::hud::{NodePosHud, PosInfo};
 use super::{NODES_PADDING, Nodes, PORT_SIZE};
 
-const NODE_WIDTH: f32 = 120.;
-const NODE_HEIGHT: f32 = 60.;
-
 const NODE_ADD_GAP: f32 = 32.;
 const NODE_ACTIONS_GROUP: &str = "node-actions";
 
@@ -88,9 +85,27 @@ impl NodeCard {
             NodeKind::Generator { .. } => NodeCardKind::Generator {},
         };
     }
+
     pub(super) fn set_select(&mut self, select: bool) {
         self.selected = select;
     }
+
+    #[inline]
+    fn width(&self) -> f32 {
+        match self.kind {
+            NodeCardKind::Normal { .. } | NodeCardKind::Generator { .. } => 120.,
+            NodeCardKind::Merge { .. } => 40.,
+        }
+    }
+
+    #[inline]
+    fn height(&self) -> f32 {
+        match self.kind {
+            NodeCardKind::Normal { .. } | NodeCardKind::Generator { .. } => 60.,
+            NodeCardKind::Merge { .. } => 40.,
+        }
+    }
+
     fn drag_move(&mut self, event: &DragMoveEvent<NodeId>, cx: &mut Context<Self>) {
         let cur_cursor = event.event.position;
         let DragState::Dragging {
@@ -126,8 +141,8 @@ impl NodeCard {
             .expect("Father should not quit")
             .read(cx)
             .size();
-        let max_x = (size.0 - NODE_WIDTH - NODES_PADDING).max(NODES_PADDING);
-        let max_y = (size.1 - NODE_HEIGHT - NODES_PADDING).max(NODES_PADDING);
+        let max_x = (size.0 - self.width() - NODES_PADDING).max(NODES_PADDING);
+        let max_y = (size.1 - self.height() - NODES_PADDING).max(NODES_PADDING);
         (
             target.0.clamp(NODES_PADDING, max_x),
             target.1.clamp(NODES_PADDING, max_y),
@@ -135,7 +150,7 @@ impl NodeCard {
     }
 
     fn add_serial_node(&mut self, cx: &mut Context<Self>) {
-        let pos = self.clamp_pos((self.pos.0 + NODE_WIDTH + NODE_ADD_GAP, self.pos.1), cx);
+        let pos = self.clamp_pos((self.pos.0 + self.width() + NODE_ADD_GAP, self.pos.1), cx);
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddSerialNode {
                 from: self.id,
@@ -152,12 +167,12 @@ impl NodeCard {
     }
 
     fn add_parallel_node(&mut self, cx: &mut Context<Self>) {
-        let pos = self.clamp_pos((self.pos.0, self.pos.1 + NODE_HEIGHT + NODE_ADD_GAP), cx);
+        let pos = self.clamp_pos((self.pos.0, self.pos.1 + self.height() + NODE_ADD_GAP), cx);
         let diff = WorkflowDiff {
             payload: WorkflowDiffPayload::Topology(WorkflowTopoChange::AddParreleNode {
                 from: self.id,
                 pos,
-                node_width: NODE_WIDTH,
+                node_width: self.width(),
             }),
         };
         let father_id = self.father_id();
@@ -211,7 +226,7 @@ impl NodeCard {
         }
     }
     pub(super) fn output_anchor(&self, relative: bool) -> Point<Pixels> {
-        let relative_pos = point(px(NODE_WIDTH), px(NODE_HEIGHT / 2.0));
+        let relative_pos = point(px(self.width()), px(self.height() / 2.0));
         if relative {
             relative_pos
         } else {
@@ -226,9 +241,9 @@ impl NodeCard {
             NodeCardKind::Generator {} => 0,
         };
         let y = if count <= 1 {
-            NODE_HEIGHT / 2.0
+            self.height() / 2.0
         } else {
-            NODE_HEIGHT * (port as f32 + 1.0) / (count as f32 + 1.0)
+            self.height() * (port as f32 + 1.0) / (count as f32 + 1.0)
         };
         let relative_pos = point(px(0.0), px(y));
         if relative {
@@ -272,8 +287,8 @@ impl Render for NodeCard {
             .absolute()
             .left(px(self.pos.0))
             .top(px(self.pos.1))
-            .w(px(NODE_WIDTH))
-            .h(px(NODE_HEIGHT))
+            .w(px(self.width()))
+            .h(px(self.height()))
             .rounded(theme.radii.medium)
             .shadow_lg()
             .bg(theme.colors.background.elevated)
@@ -307,14 +322,22 @@ impl Render for NodeCard {
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| this.drag_finish(cx)),
             )
-            .when(self.selected, |card| {
-                card.child(
-                    Outline::new(px(1.5), px(2.5))
-                        .color(theme.colors.accent)
-                        .radius(theme.radii.medium),
-                )
+            .child(match self.kind {
+                NodeCardKind::Generator { .. } | NodeCardKind::Normal { .. } => {
+                    Text::new("Nodes").content().into_any_element()
+                }
+                NodeCardKind::Merge { .. } => div()
+                    .size_full()
+                    .flex()
+                    .justify_center()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::Layers)
+                            .size(px(20.))
+                            .text_color(theme.colors.text.secondary),
+                    )
+                    .into_any_element(),
             })
-            .child(Text::new("Nodes").content())
             .children((0..self.input_count()).map(|port_id| {
                 let mut center = self.input_anchor(port_id, true);
                 center.x = px(0.);
@@ -324,10 +347,17 @@ impl Render for NodeCard {
                 let center = self.output_anchor(true);
                 render_port(center, &theme)
             })
+            .when(self.selected, |card| {
+                card.child(
+                    Outline::new(px(1.5), px(2.5))
+                        .color(theme.colors.accent)
+                        .radius(theme.radii.medium),
+                )
+            })
             .child(
                 add_button(format!("add-serial-{}", self.id).into())
                     .right(px(-10.0))
-                    .top(px(NODE_HEIGHT / 2.0 - 10.0))
+                    .top(px(self.height() / 2.0 - 10.0))
                     .on_click(cx.listener(|this, _event, _window, cx| {
                         cx.stop_propagation();
                         this.add_serial_node(cx);
@@ -337,7 +367,7 @@ impl Render for NodeCard {
                 card.child(
                     add_button(format!("add-parallel-{}", self.id).into())
                         .bottom(px(-10.0))
-                        .left(px(NODE_WIDTH / 2.0 - 10.0))
+                        .left(px(self.width() / 2.0 - 10.0))
                         .on_click(cx.listener(|this, _event, _window, cx| {
                             cx.stop_propagation();
                             this.add_parallel_node(cx);
