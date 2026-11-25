@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::project::ProjectRuntimeHandler;
 use crate::render::RenderedFrame;
-use crate::ui::components::{Icon, Loading, ResizeSensitive, Text};
+use crate::ui::components::{Button, Icon, Loading, ResizeSensitive, Text};
 use crate::ui::get_theme;
 
 use super::state::{self, EditState};
@@ -161,7 +162,7 @@ impl Monitor {
             cursor.y - viewport.origin.y - viewport.size.height / 2.,
         );
 
-        let new_zoom = (*zoom * factor).clamp(0.5, 10.0);
+        let new_zoom = (*zoom * factor).clamp(0.2, 1000.0);
         let ratio = new_zoom / *zoom;
 
         *pan = point(
@@ -182,6 +183,15 @@ impl Monitor {
                 .min(f32::from(viewport.size.height) / h as f32),
         )
     }
+
+    fn fit(&mut self, cx: &mut Context<Self>) {
+        let FrameState::Ready { zoom, pan, .. } = &mut self.frame_state else {
+            return;
+        };
+        *zoom = 1.0;
+        *pan = Point::default();
+        cx.notify();
+    }
 }
 
 impl Render for Monitor {
@@ -191,16 +201,19 @@ impl Render for Monitor {
         div().size_full().pb_1().overflow_hidden().child(
             ResizeSensitive::new()
                 .size_full()
-                .on_resize(move |bounds, _window, app| {
-                    log_if_err!(
-                        this.update(app, |this, cx| {
-                            if this.viewport != Some(bounds) {
-                                this.viewport = Some(bounds);
-                                cx.notify();
-                            }
-                        })
-                        .context("Failed to update Monitor viewport size")
-                    );
+                .on_resize({
+                    let this = this.clone();
+                    move |bounds, _window, app| {
+                        log_if_err!(
+                            this.update(app, |this, cx| {
+                                if this.viewport != Some(bounds) {
+                                    this.viewport = Some(bounds);
+                                    cx.notify();
+                                }
+                            })
+                            .context("Failed to update Monitor viewport size")
+                        );
+                    }
                 })
                 .child(match &self.frame_state {
                     FrameState::NoSession => div()
@@ -232,6 +245,7 @@ impl Render for Monitor {
                         pan,
                         ..
                     } => {
+                        // View port container
                         div()
                             .id("monitor-viewport")
                             .relative()
@@ -290,6 +304,7 @@ impl Render for Monitor {
                                 );
                                 if let Some(viewport) = self.viewport {
                                     img(frame.clone())
+                                        .absolute()
                                         .left(viewport.size.width / 2. - w / 2. + pan.x)
                                         .top(viewport.size.height / 2. - h / 2. + pan.y)
                                         .w(w)
@@ -299,6 +314,32 @@ impl Render for Monitor {
                                     div().into_any_element()
                                 }
                             })
+                            .child(
+                                // Floating button: Fit
+                                div()
+                                    .absolute()
+                                    .bottom(px(6.))
+                                    .right(px(6.))
+                                    .shadow_lg()
+                                    .child(
+                                        Button::new("monitor-fit-screen")
+                                            .normal()
+                                            .p_1()
+                                            .bg(theme.colors.background.surface)
+                                            .on_click({
+                                                let this = this.clone();
+                                                move |_evt, _window, app| {
+                                                    log_if_err!(
+                                                        this.update(app, |this, cx| {
+                                                            this.fit(cx);
+                                                        })
+                                                        .context("Failed to fit view in Monitor")
+                                                    );
+                                                }
+                                            })
+                                            .child(Icon::new(IconName::Maximize).size(px(18.))),
+                                    ),
+                            )
                             .into_any_element()
                     }
                 }),
