@@ -1,0 +1,2 @@
+[env]
+OCIO_SOURCE_DIR = { value = "third_party/OpenColorIO", relative = true, force = true }
