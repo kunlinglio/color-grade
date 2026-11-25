@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -65,9 +66,12 @@ impl Scopes {
             };
             let frame_stream = runtime.subscribe_frame_stream().await;
             let scope_stream = runtime.subscribe_scope().await;
-            let _ = this.update_in(cx, |scopes, window, cx| {
-                scopes.start(window, cx, frame_stream, scope_stream);
-            });
+            log_if_err!(
+                this.update_in(cx, |scopes, window, cx| {
+                    scopes.start(window, cx, frame_stream, scope_stream);
+                })
+                .context("Failed to start scope pipelines in Scopes")
+            );
         })
         .detach();
         Scopes {
@@ -94,44 +98,66 @@ impl Scopes {
         // Feed the scope pipeline with the latest backend frame.
         self._frame_listen_task = Some(cx.spawn_in(window, async move |this, cx| {
             while let Some((backend_frame, _)) = frame_stream.next_frame().await {
-                let _ = this.update(cx, move |this, _cx| {
-                    this.request_update_gram(backend_frame);
-                });
+                log_if_err!(
+                    this.update(cx, move |this, _cx| {
+                        this.request_update_gram(backend_frame);
+                    })
+                    .context("Failed to request a scope update for a new backend frame")
+                );
             }
         }));
 
         // Display the latest scope graph.
         self._scope_update_task = Some(cx.spawn_in(window, async move |this, cx| {
             while let Some(graph) = scope_stream.next_frame().await {
-                let _ = this.update_in(cx, |scopes, window, cx| {
-                    scopes.apply(graph, window);
-                    cx.notify();
-                });
+                log_if_err!(
+                    this.update_in(cx, |scopes, window, cx| {
+                        scopes.apply(graph, window);
+                        cx.notify();
+                    })
+                    .context("Failed to apply the rendered scope graph to Scopes")
+                );
             }
         }));
     }
 
     fn apply(&mut self, graph: ScopeGraph, window: &mut Window) {
         if let Some(previous) = self.waveform.replace(to_render_image(&graph.waveform)) {
-            let _ = window.drop_image(previous);
+            log_if_err!(
+                window
+                    .drop_image(previous)
+                    .context("Failed to drop old scope texture in Scopes")
+            );
         };
         if let Some(previous) = self
             .vectorscope
             .replace(to_render_image(&graph.vectorscope))
         {
-            let _ = window.drop_image(previous);
+            log_if_err!(
+                window
+                    .drop_image(previous)
+                    .context("Failed to drop old scope texture in Scopes")
+            );
         };
         if let Some(previous) = self
             .y_histogram
             .replace(to_render_image(&graph.y_histogram))
         {
-            let _ = window.drop_image(previous);
+            log_if_err!(
+                window
+                    .drop_image(previous)
+                    .context("Failed to drop old scope texture in Scopes")
+            );
         };
         if let Some(previous) = self
             .rgb_histogram
             .replace(to_render_image(&graph.rgb_histogram))
         {
-            let _ = window.drop_image(previous);
+            log_if_err!(
+                window
+                    .drop_image(previous)
+                    .context("Failed to drop old scope texture in Scopes")
+            );
         };
     }
 
@@ -173,10 +199,13 @@ impl Render for Scopes {
                     SegmentedSelect::<ChosenScope>::new()
                         .select(self.chosen)
                         .on_select(move |scope, _window, app| {
-                            let _ = this.update(app, |this, cx| {
-                                this.chosen = scope;
-                                cx.notify();
-                            });
+                            log_if_err!(
+                                this.update(app, |this, cx| {
+                                    this.chosen = scope;
+                                    cx.notify();
+                                })
+                                .context("Failed to switch the chosen scope view")
+                            );
                         }),
                 ),
             )
@@ -188,18 +217,22 @@ impl Render for Scopes {
                         .flex_1()
                         .min_h_0()
                         .on_resize(move |bounds, _window, app| {
-                            let _ = this_clone.update(app, |this, _cx| {
-                                let new_gram_size = Some((
-                                    usize::from(bounds.size.width.round()),
-                                    usize::from(bounds.size.height.round()),
-                                ));
-                                if new_gram_size != this.gram_size {
-                                    this.gram_size = new_gram_size;
-                                    if let Some(frame) = &this.last_frame {
-                                        this.request_update_gram(frame.clone());
-                                    }
-                                }
-                            });
+                            log_if_err!(
+                                this_clone
+                                    .update(app, |this, _cx| {
+                                        let new_gram_size = Some((
+                                            usize::from(bounds.size.width.round()),
+                                            usize::from(bounds.size.height.round()),
+                                        ));
+                                        if new_gram_size != this.gram_size {
+                                            this.gram_size = new_gram_size;
+                                            if let Some(frame) = &this.last_frame {
+                                                this.request_update_gram(frame.clone());
+                                            }
+                                        }
+                                    })
+                                    .context("Failed to update Scopes viewport size")
+                            );
                         })
                         .child(match self.get_image_by_chosen() {
                             Some(i) => img(i.clone())

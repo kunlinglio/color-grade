@@ -159,3 +159,12 @@ macro_rules! error {
         ));
     }};
 }
+
+#[doc(hidden)]
+macro_rules! log_if_err {
+    ($result:expr) => {
+        if let Err(e) = $result {
+            error!("{e:#}");
+        }
+    };
+}

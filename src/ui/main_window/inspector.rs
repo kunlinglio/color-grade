@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -108,24 +109,28 @@ impl MergeMode {
             PopupButton::new("merge-blend-mode", Some(blend_mode))
                 .min_width(px(135.))
                 .on_select_changed(move |new, window, app| {
-                    let _ = this.update(app, |this, cx| {
-                        let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
-                            return;
-                        };
-                        let diff = WorkflowDiff {
-                            payload: WorkflowDiffPayload::NodeAttr(
-                                node_id,
-                                NodeAttrDiff::MergeMode(MergeNodeKind::LayerBlend(new)),
-                            ),
-                        };
-                        let edit_state = this.edit_state.clone();
-                        let id = cx.entity_id();
-                        if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx))
-                        {
-                            warn!("Failed to apply blend mode: {:#}", e);
-                            this.sync(window, cx);
-                        }
-                    });
+                    log_if_err!(
+                        this.update(app, |this, cx| {
+                            let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
+                                return;
+                            };
+                            let diff = WorkflowDiff {
+                                payload: WorkflowDiffPayload::NodeAttr(
+                                    node_id,
+                                    NodeAttrDiff::MergeMode(MergeNodeKind::LayerBlend(new)),
+                                ),
+                            };
+                            let edit_state = this.edit_state.clone();
+                            let id = cx.entity_id();
+                            if let Err(e) =
+                                edit_state.update(cx, |this, cx| this.update(diff, id, cx))
+                            {
+                                warn!("Failed to apply blend mode: {:#}", e);
+                                this.sync(window, cx);
+                            }
+                        })
+                        .context("Failed to apply the new blend mode to the selected node")
+                    );
                 })
         });
         MergeMode::LayerBlend { blend_mode }
@@ -292,7 +297,7 @@ impl Render for Inspector {
                                 CheckBox::new("use-layer-blende-mode")
                                     .when(mode.layer_blend(), |check_box| check_box.select())
                                     .on_change(move |enabled, window, app| {
-                                        let _ = this.update(app, |this, cx| {
+                                        log_if_err!(this.update(app, |this, cx| {
                                             let InspectorMode::Merge { mode } = &mut this.mode
                                             else {
                                                 panic!("Inspector mode unmatched")
@@ -319,7 +324,10 @@ impl Render for Inspector {
                                                 this.sync(window, cx);
                                             };
                                             cx.notify();
-                                        });
+                                        })
+                                        .context(
+                                            "Failed to apply the layer blend setting to the selected node",
+                                        ));
                                     }),
                             ));
                             match mode {
@@ -366,20 +374,27 @@ fn new_slider_field(
             value,
             range,
             move |value, window, app| {
-                let _ = this.update(app, |this, cx| {
-                    let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
-                        return;
-                    };
-                    let diff = WorkflowDiff {
-                        payload: WorkflowDiffPayload::NodeAttr(node_id, on_diff(value)),
-                    };
-                    let edit_state = this.edit_state.clone();
-                    let id = cx.entity_id();
-                    if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx)) {
-                        warn!("Failed to apply {} changes: {:#}", label, e);
-                        this.sync(window, cx);
-                    }
-                });
+                log_if_err!(
+                    this.update(app, |this, cx| {
+                        let Some(node_id) = this.edit_state.read(cx).get_selected_node() else {
+                            return;
+                        };
+                        let diff = WorkflowDiff {
+                            payload: WorkflowDiffPayload::NodeAttr(node_id, on_diff(value)),
+                        };
+                        let edit_state = this.edit_state.clone();
+                        let id = cx.entity_id();
+                        if let Err(e) = edit_state.update(cx, |this, cx| this.update(diff, id, cx))
+                        {
+                            warn!("Failed to apply {} changes: {:#}", label, e);
+                            this.sync(window, cx);
+                        }
+                    })
+                    .with_context(|| format!(
+                        "Failed to apply {} change to the selected node",
+                        label
+                    ))
+                );
             },
             window,
             cx,

@@ -58,7 +58,10 @@ impl EditState {
             media: new.clone(),
             selected_node: None,
         };
-        cx.emit(SessionChanged { origin });
+        cx.emit(SessionChanged {
+            origin,
+            new: Some(new),
+        });
     }
     /// Apply diff to workflow,
     /// returns if the diff validate
@@ -123,6 +126,7 @@ pub struct SelectedNodeChanged {
 
 pub struct SessionChanged {
     pub origin: EntityId,
+    pub new: Option<Arc<Media>>,
 }
 
 pub struct NodeAttrChanged {

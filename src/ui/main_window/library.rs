@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
@@ -106,10 +107,6 @@ pub struct Library {
     ///     so we cannot use hash as key.
     ///     Here we cached GPU texture instead of CPU buffer "Thumbnail" to avoid expensive copy.
     thumbnails: HashMap<Arc<Media>, ThumbnailState>,
-    /// Pending GPU Textrue
-    /// The Arc<RenderImage> cannot free it's on GPU memory.
-    /// So we pending drop it until we can access window.
-    to_drop: Vec<Arc<RenderImage>>,
     edit_state: Entity<EditState>,
     runtime: ProjectRuntimeHandler,
     client: Option<ThumbnailManagerClient>,
@@ -143,16 +140,22 @@ impl Library {
             while let Some(e) = rx.get().await {
                 match e {
                     media::Event::Sync(list) => {
-                        let _ = this.update(cx, |library, cx| {
-                            library.media_list.replace(list);
-                            cx.notify();
-                        });
+                        log_if_err!(
+                            this.update(cx, |library, cx| {
+                                library.media_list.replace(list);
+                                cx.notify();
+                            })
+                            .context("Failed to update synced media list into Library")
+                        );
                     }
                     media::Event::Add(media) => {
-                        let _ = this.update(cx, |library, cx| {
-                            library.media_list.insert_sorted(media);
-                            cx.notify();
-                        });
+                        log_if_err!(
+                            this.update(cx, |library, cx| {
+                                library.media_list.insert_sorted(media);
+                                cx.notify();
+                            })
+                            .context("Failed to add newly scanned media into Library")
+                        );
                     }
                 }
             }
@@ -171,7 +174,6 @@ impl Library {
         Library {
             media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
             thumbnails: HashMap::new(),
-            to_drop: Vec::new(),
             edit_state,
             runtime,
             client: None,
@@ -183,7 +185,12 @@ impl Library {
         }
     }
 
-    fn fetch_thumbs(&mut self, new_visible: HashSet<Arc<Media>>, cx: &mut Context<Self>) {
+    fn fetch_thumbs(
+        &mut self,
+        new_visible: HashSet<Arc<Media>>,
+        cx: &mut Context<Self>,
+        window: &mut Window,
+    ) {
         let added: Vec<_> = new_visible
             .iter()
             .filter(|key| !self.thumbnails.contains_key(*key))
@@ -204,22 +211,27 @@ impl Library {
             let client = client.clone();
             cx.spawn(async move |this, cx| {
                 let thumb = client.request(media.clone(), size).await;
-                let _ = this.update(cx, |this, cx| {
-                    let Some(slot) = this.thumbnails.get_mut(&media) else {
-                        return;
-                    };
-                    if !matches!(*slot, ThumbnailState::Loading(current) if current == size) {
-                        // Avoid cover other state
-                        return;
-                    }
-                    *slot = match thumb {
-                        Some(thumb) => ThumbnailState::Loaded(Arc::new(RenderImage::new(vec![
-                            image::Frame::new(thumb.frame.to_image()),
-                        ]))),
-                        None => ThumbnailState::Failed,
-                    };
-                    cx.notify();
-                });
+                log_if_err!(
+                    this.update(cx, |this, cx| {
+                        let Some(slot) = this.thumbnails.get_mut(&media) else {
+                            return;
+                        };
+                        if !matches!(*slot, ThumbnailState::Loading(current) if current == size) {
+                            // Avoid cover other state
+                            return;
+                        }
+                        *slot = match thumb {
+                            Some(thumb) => {
+                                ThumbnailState::Loaded(Arc::new(RenderImage::new(vec![
+                                    image::Frame::new(thumb.frame.to_image()),
+                                ])))
+                            }
+                            None => ThumbnailState::Failed,
+                        };
+                        cx.notify();
+                    })
+                    .context("Failed to store fetched thumbnail into Library")
+                );
             })
             .detach();
         }
@@ -227,7 +239,11 @@ impl Library {
             if let Some(old) = self.thumbnails.remove(&media) {
                 match old {
                     ThumbnailState::Loaded(old) => {
-                        self.to_drop.push(old);
+                        log_if_err!(
+                            window
+                                .drop_image(old)
+                                .context("Failed to drop old thumbnail texture in Library")
+                        );
                     }
                     _ => {}
                 }
@@ -235,17 +251,16 @@ impl Library {
         }
     }
 
-    fn clean_texture(&mut self, window: &mut Window) {
-        while let Some(t) = self.to_drop.pop() {
-            let _ = window.drop_image(t);
-        }
-    }
-
     fn change_sort_by(&mut self, new: MediaSortBy) {
         self.media_list.change_sort_by(new);
     }
 
-    fn change_thumbnail_size(&mut self, new: ThumbnailSize, cx: &mut Context<Self>) {
+    fn change_thumbnail_size(
+        &mut self,
+        new: ThumbnailSize,
+        cx: &mut Context<Self>,
+        window: &mut Window,
+    ) {
         if self.thumbnail_size == new {
             return;
         }
@@ -254,7 +269,11 @@ impl Library {
         for (_, state) in self.thumbnails.drain() {
             // TODO: Avoid show loading item when fetching new thumbs
             if let ThumbnailState::Loaded(image) = state {
-                self.to_drop.push(image);
+                log_if_err!(
+                    window
+                        .drop_image(image)
+                        .context("Failed to drop old thumbnail texture in Library")
+                );
             }
         }
         cx.notify();
@@ -272,7 +291,7 @@ impl Library {
         window
             .spawn(cx, async move |app| {
                 let client = runtime.open_media(&new.path).await;
-                let _ = this.update(app, |library, cx| {
+                this.update(app, |library, cx| {
                     let id = cx.entity_id();
                     library.edit_state.update(cx, |editor, cx| {
                         editor.open_media(new, client, id, cx);
@@ -285,8 +304,7 @@ impl Library {
 }
 
 impl Render for Library {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.clean_texture(window);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = get_theme(cx);
         let medias_len = self.media_list.list.len();
         let selected_media = self.edit_state.read(cx).get_selected_media();
@@ -303,10 +321,14 @@ impl Render for Library {
                     SegmentedSelect::<MediaSortBy>::new()
                         .select(self.media_list.sort_by)
                         .on_select(move |sort_by, _window, app| {
-                            let _ = this_for_select.update(app, |this, cx| {
-                                this.change_sort_by(sort_by);
-                                cx.notify();
-                            });
+                            log_if_err!(
+                                this_for_select
+                                    .update(app, |this, cx| {
+                                        this.change_sort_by(sort_by);
+                                        cx.notify();
+                                    })
+                                    .context("Failed to apply the new sort order to Library")
+                            );
                         }),
                 ),
             )
@@ -315,10 +337,14 @@ impl Render for Library {
                     .size_full()
                     .on_resize(move |bounds, window, app| {
                         let width = f32::from(bounds.size.width);
-                        let _ = this_for_resize.update(app, |library, cx| {
-                            library.width = px(width);
-                            cx.notify();
-                        });
+                        log_if_err!(
+                            this_for_resize
+                                .update(app, |library, cx| {
+                                    library.width = px(width);
+                                    cx.notify();
+                                })
+                                .context("Failed to update Library panel width")
+                        );
                         let size = ThumbnailSize::from_width(width);
                         let needs_update = this_for_resize
                             .read_with(app, |library, _cx| library.thumbnail_size != size)
@@ -327,10 +353,13 @@ impl Render for Library {
                             return;
                         }
                         let this = this_for_resize.clone();
-                        window.defer(app, move |_window, app| {
-                            let _ = this.update(app, |library, cx| {
-                                library.change_thumbnail_size(size, cx);
-                            });
+                        window.defer(app, move |window, app| {
+                            log_if_err!(
+                                this.update(app, |library, cx| {
+                                    library.change_thumbnail_size(size, cx, window);
+                                })
+                                .context("Failed to apply the new thumbnail size to Library")
+                            );
                         });
                     })
                     .child(media_list(
@@ -383,10 +412,14 @@ fn media_list(
             // The uniform list often call this callback twice:
             // First for measure element height, second for draw visible element.
             // So we should drop first call, whose range length is always 1.
-            window.defer(app, move |_window, app| {
-                let _ = this_for_visible.update(app, |library, cx| {
-                    library.fetch_thumbs(prefetch, cx);
-                });
+            window.defer(app, move |window, app| {
+                log_if_err!(
+                    this_for_visible
+                        .update(app, |library, cx| {
+                            library.fetch_thumbs(prefetch, cx, window);
+                        })
+                        .context("Failed to fetch thumbnails for Library")
+                );
             });
         }
 
@@ -407,9 +440,12 @@ fn media_list(
                     .rounded(theme.radii.large)
                     .on_click(move |_event, window, app| {
                         let media = media.clone();
-                        let _ = this.update(app, |library, cx| {
-                            library.select_media(media, cx, window);
-                        });
+                        log_if_err!(
+                            this.update(app, |library, cx| {
+                                library.select_media(media, cx, window);
+                            })
+                            .context("Failed to select media in Library")
+                        );
                     })
                     .child(render_thumb(theme, thumb));
 
@@ -442,7 +478,6 @@ fn render_thumb(theme: Theme, thumb: Option<ThumbnailState>) -> AnyElement {
     let bg = div()
         .size_full()
         .rounded(theme.radii.small)
-        .bg(theme.colors.background.surface)
         .flex()
         .items_center()
         .justify_center();

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context as _;
 use gpui_kit::base::StyledExt;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -271,11 +272,14 @@ impl Render for Nodes {
                 ResizeSensitive::new()
                     .flex_1()
                     .on_resize(move |bounds, _window, app| {
-                        let _ = this.update(app, |this, _cx| {
-                            let width = f32::from(bounds.size.width);
-                            let height = f32::from(bounds.size.height);
-                            this.size = (width, height);
-                        });
+                        log_if_err!(
+                            this.update(app, |this, _cx| {
+                                let width = f32::from(bounds.size.width);
+                                let height = f32::from(bounds.size.height);
+                                this.size = (width, height);
+                            })
+                            .context("Failed to update Nodes panel size")
+                        );
                     })
                     .child(match &self.state {
                         NodesState::Inactive => div()

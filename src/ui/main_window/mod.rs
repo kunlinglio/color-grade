@@ -56,8 +56,10 @@ impl MainWindow {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or("Unknown Project".to_string());
 
-        let monitor = cx.new(|cx| monitor::Monitor::new(cx, runtime.clone()));
         let edit_state = cx.new(|_cx| EditState::new());
+
+        let monitor =
+            cx.new(|cx| monitor::Monitor::new(cx, runtime.clone(), edit_state.clone(), window));
         let library = cx.new(|cx| library::Library::new(cx, runtime.clone(), edit_state.clone()));
         let nodes = cx.new(|cx| nodes::Nodes::new(cx, edit_state.clone()));
         let inspector = cx.new(|cx| inspector::Inspector::new(window, cx, edit_state.clone()));
