@@ -76,14 +76,14 @@ impl MainWindow {
 
     pub fn open(app: &mut App, runtime: ProjectRuntimeHandler, project_path: PathBuf) {
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Maximized(Bounds {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: Point {
                     x: 0.0.into(),
                     y: 0.0.into(),
                 },
                 size: gpui_kit::Size {
-                    height: 1080.0.into(),
-                    width: 1920.0.into(),
+                    height: 768.0.into(),
+                    width: 1376.0.into(),
                 },
             })),
             titlebar: Some(TitlebarOptions {

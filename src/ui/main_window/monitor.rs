@@ -19,6 +19,7 @@ pub struct Monitor {
     viewport: Option<Bounds<Pixels>>,
     zoom_fit: f32,
     zoom: f32,
+    /// View center -> Frame center
     pan: Point<Pixels>,
     last_cursor: Option<Point<Pixels>>,
 }
@@ -55,14 +56,12 @@ impl Monitor {
             // Drop the previous image's tile or every rendered frame leaks GPU memory.
             let _ = window.drop_image(previous);
         }
-        if let Some(viewport) = &self.viewport {
-            self.zoom_fit = (f32::from(viewport.size.width) / frame.size().0 as f32)
-                .min(f32::from(viewport.size.height) / frame.size().1 as f32)
+        // TODO: Support re-fit when session changed, rather than resolution changed
+        if self.image_size != Some(frame.size()) {
+            self.image_size = Some(frame.size());
+            self.last_cursor = None;
+            self.fit();
         }
-        self.image_size = Some(frame.size());
-        self.zoom = 1.0;
-        self.pan = Point::default();
-        self.last_cursor = None;
     }
 
     fn drag_move(&mut self, event: &DragMoveEvent<MonitorDrag>, cx: &mut Context<Self>) {
@@ -88,7 +87,11 @@ impl Monitor {
             warn!("Zoom Monitor before prepaint, ignore it");
             return;
         };
-        let scroll_point = point(cursor.x - viewport.origin.x, cursor.y - viewport.origin.y);
+        // scroll point in view coordinate
+        let scroll_point = point(
+            cursor.x - viewport.origin.x - viewport.size.width / 2.,
+            cursor.y - viewport.origin.y - viewport.size.height / 2.,
+        );
 
         let new_zoom = (self.zoom * factor).clamp(0.5, 10.0);
         let ratio = new_zoom / self.zoom;
@@ -99,6 +102,19 @@ impl Monitor {
         );
         self.zoom = new_zoom;
     }
+
+    fn fit(&mut self) {
+        let Some((w, h)) = self.image_size else {
+            warn!("Cannot fit view without frame loaded");
+            return;
+        };
+        if let Some(viewport) = &self.viewport {
+            self.zoom_fit = (f32::from(viewport.size.width) / w as f32)
+                .min(f32::from(viewport.size.height) / h as f32)
+        }
+        self.zoom = 1.0;
+        self.pan = Point::default();
+    }
 }
 
 impl Render for Monitor {
@@ -107,6 +123,7 @@ impl Render for Monitor {
         let this = cx.weak_entity();
         ResizeSensitive::new()
             .size_full()
+            // FIXME: This could cause incorrect bounds
             .pb_1()
             .overflow_hidden()
             .on_resize(move |bounds, _window, app| {
@@ -140,33 +157,41 @@ impl Render for Monitor {
                         cx.listener(|this, _event, _window, _cx| this.drag_finish()),
                     )
                     .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
-                        if event.modifiers.secondary(cx) {
-                            // CMD/Ctrl + scroll
-                            let dy = f32::from(event.delta.pixel_delta(px(50.)).y);
-                            this.zoom_at(event.position, (dy * 0.003).exp());
-                            cx.notify();
-                        } else {
-                            // scroll
-                            let d = event.delta.pixel_delta(px(20.));
-                            this.pan += d;
-                            cx.notify();
+                        match event.delta {
+                            ScrollDelta::Lines(delta) => {
+                                // wheel scrolling: zoom
+                                this.zoom_at(event.position, (delta.y * 0.15).exp());
+                            }
+                            ScrollDelta::Pixels(delta) => {
+                                // touch pad scroll
+                                if event.modifiers.secondary(cx) {
+                                    // CMD/Ctrl + scroll: zooms
+                                    let dy = f32::from(delta.y);
+                                    this.zoom_at(event.position, (dy * 0.003).exp());
+                                } else {
+                                    // move
+                                    this.pan += delta;
+                                }
+                            }
                         }
+                        cx.notify();
                     }))
                     .on_pinch(cx.listener(|this, event: &PinchEvent, _window, cx| {
                         this.zoom_at(event.position, 1.0 + event.delta);
                         cx.notify();
                     }))
-                    .child(
+                    .child({
+                        // frame width, height in view
+                        let (w, h) = (
+                            px(self.image_size.unwrap().0 as f32 * self.zoom * self.zoom_fit),
+                            px(self.image_size.unwrap().1 as f32 * self.zoom * self.zoom_fit),
+                        );
                         img(i.clone())
-                            .left(self.pan.x)
-                            .top(self.pan.y)
-                            .w(px(self.image_size.unwrap().0 as f32
-                                * self.zoom
-                                * self.zoom_fit))
-                            .h(px(self.image_size.unwrap().1 as f32
-                                * self.zoom
-                                * self.zoom_fit)),
-                    )
+                            .left(self.viewport.unwrap().size.width / 2. - w / 2. + self.pan.x)
+                            .top(self.viewport.unwrap().size.height / 2. - h / 2. + self.pan.y)
+                            .w(w)
+                            .h(h)
+                    })
                     .into_any_element(),
                 None => div()
                     .size_full()
