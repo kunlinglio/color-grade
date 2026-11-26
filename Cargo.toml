@@ -23,3 +23,7 @@ opt-level = 0
 # To avoid the app being unberablly slow
 [profile.dev.package."*"]
 opt-level = 3
+
+[build-dependencies]
+# To make ./build.rs execute after ocio-sys build complete
+ocio-sys = { version = "0.4", features = ["bundled", "v2_6"] }

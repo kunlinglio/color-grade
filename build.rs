@@ -13,10 +13,21 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.lock");
 
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("set by cargo"));
-    let Some(db) = newest_compile_database() else {
-        return;
-    };
     let link = manifest_dir.join("compile_commands.json");
+    let db = match newest_compile_database() {
+        Ok(Some(db)) => db,
+        Ok(None) => {
+            println!(
+                "cargo:warning=no bundled OCIO compile_commands.json found; the repo-root link was not updated. Ensure you have update the submodules and the compilation of ocio-sys succeeded"
+            );
+            return;
+        }
+        Err(error) => {
+            println!("cargo:warning=failed to find the OCIO compile database: {error}");
+            return;
+        }
+    };
+
     // Use relative links: it keeps working if the checkout is moved.
     let target = db.strip_prefix(&manifest_dir).unwrap_or(&db);
 
@@ -24,11 +35,31 @@ fn main() {
         return;
     }
     // Never replace a regular file someone put there.
-    if let Ok(meta) = fs::symlink_metadata(&link) {
-        if !meta.file_type().is_symlink() {
+    match fs::symlink_metadata(&link) {
+        Ok(meta) if !meta.file_type().is_symlink() => {
+            println!(
+                "cargo:warning=not replacing {}: it already exists and is not a symlink",
+                link.display()
+            );
             return;
         }
-        let _ = fs::remove_file(&link);
+        Ok(_) => {
+            if let Err(error) = fs::remove_file(&link) {
+                println!(
+                    "cargo:warning=could not remove stale link {}: {error}",
+                    link.display()
+                );
+                return;
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            println!(
+                "cargo:warning=could not inspect {}: {error}",
+                link.display()
+            );
+            return;
+        }
     }
     if let Err(error) = create_symlink(target, &link) {
         println!("cargo:warning=could not link compile_commands.json: {error}");
@@ -36,33 +67,50 @@ fn main() {
 }
 
 /// ocio-sys builds OCIO under `target/<profile>/build/ocio-sys-<hash>/out/cmake-*/build`.
-fn newest_compile_database() -> Option<PathBuf> {
+fn newest_compile_database() -> std::io::Result<Option<PathBuf>> {
     // OUT_DIR is `<target>/<profile>/build/color-grade-<hash>/out`.
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
-    let build_root = out_dir.ancestors().nth(2)?;
+    let out_dir = PathBuf::from(
+        env::var_os("OUT_DIR").ok_or_else(|| std::io::Error::other("OUT_DIR is not set"))?,
+    );
+    let build_root = out_dir
+        .ancestors()
+        .nth(2)
+        .ok_or_else(|| std::io::Error::other("OUT_DIR has no Cargo build directory"))?;
 
     let mut newest: Option<(SystemTime, PathBuf)> = None;
-    for entry in fs::read_dir(build_root).ok()?.flatten() {
+    for entry in fs::read_dir(build_root)? {
+        let entry = entry?;
         if !entry.file_name().to_string_lossy().starts_with("ocio-sys-") {
             continue;
         }
-        let Ok(files) = fs::read_dir(entry.path().join("out")) else {
-            continue;
+        let files = match fs::read_dir(entry.path().join("out")) {
+            Ok(files) => files,
+            // Cargo also creates ocio-sys directories for the build-script
+            // executable; those have no out directory.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
         };
-        for file in files.flatten() {
+        for file in files {
+            let file = file?;
             if !file.file_name().to_string_lossy().starts_with("cmake-") {
                 continue;
             }
             let db = file.path().join("build/compile_commands.json");
-            let Ok(modified) = fs::metadata(&db).and_then(|meta| meta.modified()) else {
-                continue;
+            let metadata = match fs::metadata(&db) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
             };
+            if !metadata.is_file() {
+                continue;
+            }
+            let modified = metadata.modified()?;
             if newest.as_ref().is_none_or(|(time, _)| modified > *time) {
                 newest = Some((modified, db));
             }
         }
     }
-    newest.map(|(_, db)| db)
+    Ok(newest.map(|(_, db)| db))
 }
 
 #[cfg(unix)]

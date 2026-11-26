@@ -901,6 +901,7 @@ dependencies = [
  "lru",
  "mimalloc",
  "ocio-rs",
+ "ocio-sys",
  "rayon",
  "strum",
  "xxhash-rust",
