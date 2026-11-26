@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use futures::channel::mpsc;
+use image::DynamicImage;
 
-use crate::render::{Frame, Renderer};
+use crate::render::{Frame, MediaIcc, Renderer};
 
 use super::{Workflow, WorkflowDiff};
 
@@ -12,17 +14,26 @@ pub(super) struct Session {
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     /// The ONLY SOURCE OF TRUTH of workflow
     workflow: Workflow,
-    decoded: Arc<Frame>,
+    decoded: Arc<(Frame, Option<MediaIcc>)>,
 }
 
 impl Session {
     pub fn new(path: PathBuf) -> anyhow::Result<(Self, SessionClient)> {
-        let img = image::ImageReader::open(&path)?
-            .with_guessed_format()?
-            .decode()?;
+        let mut decoder = image::ImageReader::open(&path)
+            .with_context(|| format!("Failed to open image {}", path.display()))?
+            .with_guessed_format()
+            .with_context(|| format!("Failed to guess format for {}", path.display()))?
+            .into_decoder()
+            .with_context(|| format!("Failed to decode image {}", path.display()))?;
+        let icc = MediaIcc::from_image(&mut decoder)
+            .with_context(|| format!("Failed to read icc profile for {}", path.display()))?;
+        let img = DynamicImage::from_decoder(decoder)?;
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
-        let decoded_frame = Arc::new(Frame::new(width as usize, height as usize, rgba.to_vec()));
+        let decoded_frame = Arc::new((
+            Frame::new(width as usize, height as usize, rgba.to_vec()),
+            icc,
+        ));
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
         let workflow = Workflow::default();
         let session = Session {

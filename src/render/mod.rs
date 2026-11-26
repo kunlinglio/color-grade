@@ -1,4 +1,5 @@
 mod scheduler;
+use anyhow::Context;
 pub use scheduler::FrameStream;
 mod render_list;
 pub use render_list::{BlendMode, Op, PointwiseOp, RenderList, Slot};
@@ -6,7 +7,7 @@ mod renderer;
 pub use renderer::{BackendFrame, Renderer, ScopeGraph};
 mod scalar;
 
-use image::RgbaImage;
+use image::{ImageDecoder, RgbaImage};
 
 /// A Frame only for UI usage.
 /// Following GPUI requirement, we use bgra inside.
@@ -61,5 +62,33 @@ impl Frame {
     /// Return (width, height)
     pub fn _size(&self) -> (usize, usize) {
         (self.width, self.height)
+    }
+}
+
+pub struct MediaIcc {
+    description: Option<String>,
+    raw: Vec<u8>,
+}
+
+impl MediaIcc {
+    pub fn from_image(image: &mut impl ImageDecoder) -> anyhow::Result<Option<Self>> {
+        let raw = image.icc_profile().context("Failed to read icc profile")?;
+        match raw {
+            Some(raw) => {
+                let profile = lcms2::Profile::new_icc(&raw).context("Failed to parse icc bytes")?;
+                Ok(Some(Self {
+                    description: profile.info(lcms2::InfoType::Description, lcms2::Locale::none()),
+                    raw,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+    fn hash(&self) -> u128 {
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+        for slice in self.raw.chunks(64 * 1024) {
+            hasher.update(slice);
+        }
+        hasher.digest128()
     }
 }

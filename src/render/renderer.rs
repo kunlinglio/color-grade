@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use rayon::ThreadPool;
 
-use super::FrameStream;
 use super::render_list::RenderList;
 use super::scalar::ScalarBackend;
 use super::scheduler::Scheduler;
 use super::{Frame, RenderedFrame};
+use super::{FrameStream, MediaIcc};
 
 #[derive(Clone)]
 pub struct ScopeGraph {
@@ -18,9 +18,10 @@ pub struct ScopeGraph {
 }
 
 pub struct Renderer {
-    /// Pipeline to handle frame render requests
-    render_scheduler: Scheduler<(RenderList, Arc<Frame>), (BackendFrame, Arc<RenderedFrame>)>,
-    /// Pipeline to handle scope render requests
+    /// Scheduler to handle frame render requests
+    render_scheduler:
+        Scheduler<(RenderList, Arc<(Frame, Option<MediaIcc>)>), (BackendFrame, Arc<RenderedFrame>)>,
+    /// Scheduler to handle scope render requests
     scope_scheduler: Scheduler<(BackendFrame, usize, usize), ScopeGraph>,
 }
 
@@ -40,7 +41,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&self, list: RenderList, from: Arc<Frame>) {
+    pub fn render(&self, list: RenderList, from: Arc<(Frame, Option<MediaIcc>)>) {
         self.render_scheduler.submit((list, from));
     }
 
@@ -64,7 +65,7 @@ pub(super) trait RendererBackend: Send + Sync {
     fn handle_render(
         &self,
         list: RenderList,
-        from: Arc<Frame>,
+        from: Arc<(Frame, Option<MediaIcc>)>,
     ) -> (BackendFrame, Arc<RenderedFrame>);
     fn handle_scope(&self, from: BackendFrame, width: usize, height: usize) -> ScopeGraph;
 }

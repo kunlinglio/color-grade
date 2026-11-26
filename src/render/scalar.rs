@@ -1,23 +1,131 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, bail};
+use ocio_rs::transform::{ColorSpaceTransform, FileTransform, GroupTransform, Transform};
+use ocio_rs::{Config, ConfigIOProxy, StaticCPUProcessor, TransformDirection};
 
 use super::render_list::{Op, RenderList, Slot};
 use super::renderer::RendererBackend;
 use super::renderer::ScopeGraph;
-use super::{BackendFrame, Frame, RenderedFrame};
+use super::{BackendFrame, Frame, MediaIcc, RenderedFrame};
 
 /// The most basic render backend. It deliberately favors correctness over
 /// performance and serves as the reference implementation for regression tests
 /// against optimized backends.
-pub(super) struct ScalarBackend {}
+pub(super) struct ScalarBackend {
+    input_processor_cache: Mutex<HashMap<u128, Arc<StaticCPUProcessor>>>,
+    fallback_input_processor: Arc<StaticCPUProcessor>,
+    output_transform: StaticCPUProcessor,
+}
 
 impl ScalarBackend {
     pub fn new() -> Self {
-        Self {}
+        let cfg =
+            Config::from_file("ocio://cg-config-latest").expect("Load OCIO config should not fail");
+        let fallback_input_processor = cfg
+            .processor("sRGB Encoded Rec.709 (sRGB)", "ACEScct")
+            .expect("Create processor should not fail")
+            .default_cpu_processor()
+            .expect("Allocate CPU processor should not fail")
+            .try_into_static()
+            .expect("Processor should not contain dynamic properties");
+        let output_transform = cfg
+            .processor_display(
+                "ACEScct",
+                "sRGB - Display",
+                // TODO: Clarify scene-referred and display-referred and support gamut mapping
+                // "ACES 2.0 - SDR 100 nits (Rec.709)",
+                "Un-tone-mapped",
+                TransformDirection::Forward,
+            )
+            .expect("Create display processor should not fail")
+            .default_cpu_processor()
+            .expect("Allocate CPU processor should not fail")
+            .try_into_static()
+            .expect("Processor should not contain dynamic properties");
+
+        Self {
+            input_processor_cache: Mutex::new(HashMap::new()),
+            fallback_input_processor: Arc::new(fallback_input_processor),
+            output_transform,
+        }
     }
 
-    fn execute(list: RenderList, from: &Frame) -> anyhow::Result<ScalarFrame> {
+    fn get_input_processor(
+        &self,
+        icc: &Option<MediaIcc>,
+    ) -> anyhow::Result<Arc<StaticCPUProcessor>> {
+        let Some(icc) = icc else {
+            return Ok(self.fallback_input_processor.clone());
+        };
+        let key = icc.hash();
+        if let Some(processor) = self
+            .input_processor_cache
+            .lock()
+            .expect("Input processor cache mutex poisoned")
+            .get(&key)
+            .cloned()
+        {
+            return Ok(processor);
+        }
+        let path = format!("/not/exists/icc-{key}.icc");
+
+        let proxy = ConfigIOProxy::create().expect("Create Config Proxy should not fail");
+        let success = proxy
+            .set_lut_data_with_hash_bytes(&path, &icc.raw, &key.to_le_bytes())
+            .expect("Insert lut data should not fail");
+        assert!(success, "Proxy should accept lut data");
+
+        let config =
+            Config::from_file("ocio://cg-config-latest").expect("Load OCIO config should not fail");
+        config
+            .set_config_io_proxy_object(&proxy)
+            .expect("Insert proxy should not fail");
+
+        let file = FileTransform::create().expect("Create file transform should not failed");
+        file.set_src(&path).expect("Set source should not fail");
+        file.set_direction(TransformDirection::Inverse);
+
+        let to_cct = ColorSpaceTransform::create().expect("Create transform should not failed");
+        to_cct
+            .set_src("CIE XYZ-D65 - Scene-referred")
+            .expect("Set source should not fail");
+        to_cct
+            .set_dst("ACEScct")
+            .expect("Set destination should not fail");
+
+        let group = GroupTransform::create().expect("Create group transform should not fail");
+        group
+            .append_transform(&file)
+            .expect("Append file transform should not fail");
+        group
+            .append_transform(&to_cct)
+            .expect("Append color space transform should not fail");
+
+        let processor = config
+            .processor_from_transform(&Transform::Group(group), TransformDirection::Forward)
+            .context("Failed to create processor from icc")?;
+        let cpu = Arc::new(
+            processor
+                .default_cpu_processor()
+                .expect("Allocate CPU processor should not failed")
+                .try_into_static()
+                .expect("CPU processor should not contain dynamic properties"),
+        );
+        self.input_processor_cache
+            .lock()
+            .expect("Input processor cache mutex poisoned")
+            .insert(key, cpu.clone());
+        Ok(cpu)
+    }
+
+    fn execute(
+        &self,
+        list: RenderList,
+        from: &Frame,
+        icc: &Option<MediaIcc>,
+    ) -> anyhow::Result<ScalarFrame> {
         list.verify().context("invalid render list")?;
         let RenderList {
             slot_count,
@@ -35,7 +143,14 @@ impl ScalarBackend {
         let seed = slots.get_mut(input_index).with_context(|| {
             format!("input slot {input_index} out of range (slot_count = {slot_count})")
         })?;
-        *seed = Some(ScalarFrame::from_frame(from));
+        let mut input = ScalarFrame::from_frame(from);
+        let pixel_num = input.rgba.len() / 4;
+        let input_transform = self.get_input_processor(icc).unwrap_or_else(|e| {
+            error!("{e:#}");
+            self.fallback_input_processor.clone()
+        });
+        input_transform.apply_rgba_pixels(&mut input.rgba, pixel_num as i64, 4);
+        *seed = Some(input);
 
         // Execute body
         for (op_index, op) in ops.iter().enumerate() {
@@ -91,6 +206,12 @@ impl ScalarBackend {
             })?
             .take()
             .with_context(|| format!("output slot {output_index} was never written"))
+            .map(|mut frame| {
+                let pixel_num = frame.rgba.len() / 4;
+                self.output_transform
+                    .apply_rgba_pixels(&mut frame.rgba, pixel_num as i64, 4);
+                frame
+            })
     }
 }
 
@@ -150,9 +271,10 @@ impl RendererBackend for ScalarBackend {
     fn handle_render(
         &self,
         list: RenderList,
-        from: Arc<Frame>,
+        from: Arc<(Frame, Option<MediaIcc>)>,
     ) -> (BackendFrame, Arc<RenderedFrame>) {
-        let buffer = Self::execute(list, from.as_ref())
+        let buffer = self
+            .execute(list, &from.0, &from.1)
             .unwrap_or_else(|err| panic!("scalar backend failed to render: {err:#}"));
         let rendered = RenderedFrame::from_frame(buffer.to_frame());
         (BackendFrame::new(buffer), Arc::new(rendered))

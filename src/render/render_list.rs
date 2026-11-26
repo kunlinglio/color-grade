@@ -1,6 +1,34 @@
 use anyhow::Context;
 use strum::EnumIter;
 
+/// Render List is an important IR (Intermediate Representation) in render pipeline.
+/// It contains:
+/// - a sequence of Ops: instructions
+/// - max slot count: max "registers" backend can prealloc in ahead
+/// - input & output: calling convention, specified which slot can be used
+///   for input and output
+///   PS: The register move in ISA is pretty cheap but expensive in our case, so we
+///       use "Configuration" over "Convention". :)
+///
+/// Since all backend share one Render List definition, it should not have any
+/// assumption to a particular consumer.
+///
+/// NOTE: Every frames in Intermediate (not all Slots) should follow:
+///      - AP1 Color Gamut with D60
+///      - ACEScct
+///      - RGBA: [f32; 4] precision with straight alpha
+#[derive(Debug)]
+pub struct RenderList {
+    /// The frame buffers slots backend need to pre alloc.
+    /// These slots will used as operands in the ops.
+    pub slot_count: usize,
+    pub ops: Vec<Op>,
+    /// The target to copy input to.
+    pub input: Slot,
+    /// The source to copy output from.
+    pub output: Slot,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Slot(u32);
 
@@ -14,18 +42,6 @@ impl Slot {
     fn inside(&self, slot_count: usize) -> bool {
         (self.0 as usize) < slot_count
     }
-}
-
-#[derive(Debug)]
-pub struct RenderList {
-    /// The frame buffers slots backend need to pre alloc.
-    /// These slots will used as operands in the ops.
-    pub slot_count: usize,
-    pub ops: Vec<Op>,
-    /// The target to copy input to.
-    pub input: Slot,
-    /// The source to copy output from.
-    pub output: Slot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, Default)]
