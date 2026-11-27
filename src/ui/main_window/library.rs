@@ -172,7 +172,7 @@ impl Library {
             },
         );
         Library {
-            media_list: MediaList::new(Vec::new(), MediaSortBy::Hash),
+            media_list: MediaList::new(Vec::new(), MediaSortBy::Path),
             thumbnails: HashMap::new(),
             edit_state,
             runtime,

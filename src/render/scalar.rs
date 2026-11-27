@@ -411,9 +411,68 @@ mod kernel {
     use super::ScalarFrame;
     use crate::render::{BlendMode, PointwiseOp, RenderedFrame};
 
-    #[inline]
-    fn luma(r: f32, g: f32, b: f32) -> f32 {
-        0.2126 * r + 0.7152 * g + 0.0722 * b
+    mod acescct {
+        const LOG_SLOPE: f32 = 1.0 / 17.52;
+        const LOG_OFFSET: f32 = 9.72 / 17.52;
+        const LINEAR_BREAK: f32 = 0.007_812_5; // 2^-7
+        const LN_2: f32 = 0.693_147_180_559_945_3;
+
+        const TOE_SLOPE: f32 = LOG_SLOPE / (LINEAR_BREAK * LN_2); // (log2(x))' when x = 2^-7
+        const TOE_OFFSET: f32 = LOG_BREAK - TOE_SLOPE * LINEAR_BREAK;
+        const LOG_BREAK: f32 = LOG_SLOPE * -7.0 + LOG_OFFSET; // ACEScct(2^-7), -7 = log2(2^-7)
+
+        #[inline(always)]
+        pub(super) fn to_linear(y: f32) -> f32 {
+            if y <= LOG_BREAK {
+                (y - TOE_OFFSET) / TOE_SLOPE
+            } else {
+                ((y - LOG_OFFSET) / LOG_SLOPE).exp2()
+            }
+        }
+
+        #[inline(always)]
+        pub(super) fn from_linear(x: f32) -> f32 {
+            if x <= LINEAR_BREAK {
+                TOE_SLOPE * x + TOE_OFFSET
+            } else {
+                LOG_SLOPE * x.log2() + LOG_OFFSET
+            }
+        }
+
+        const LUMA: [f32; 3] = [0.27222872, 0.67408177, 0.05368952];
+
+        #[inline(always)]
+        pub(super) fn luma(r: f32, g: f32, b: f32) -> f32 {
+            LUMA[0] * r + LUMA[1] * g + LUMA[2] * b
+        }
+    }
+
+    mod display_p3 {
+        const LUMA: [f32; 3] = [0.2289745641, 0.6917385218, 0.0792869141];
+
+        #[inline(always)]
+        pub(super) fn luma(r: f32, g: f32, b: f32) -> f32 {
+            LUMA[0] * r + LUMA[1] * g + LUMA[2] * b
+        }
+
+        const CB_SCALE: f32 = 2.0 * (1.0 - LUMA[2]);
+        const CR_SCALE: f32 = 2.0 * (1.0 - LUMA[0]);
+
+        #[inline(always)]
+        pub(super) fn to_cb_cr(r: f32, g: f32, b: f32) -> (f32, f32) {
+            let y = luma(r, g, b);
+            let cb = (b - y) / CB_SCALE;
+            let cr = (r - y) / CR_SCALE;
+            (cb, cr)
+        }
+
+        #[inline(always)]
+        pub(super) fn from_cb_cr(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
+            let r = y + cr * CR_SCALE;
+            let b = y + cb * CB_SCALE;
+            let g = (y - LUMA[0] * r - LUMA[2] * b) / LUMA[1];
+            (r, g, b)
+        }
     }
 
     pub(super) fn apply_pointwise(buffer: &mut ScalarFrame, operations: &[PointwiseOp]) {
@@ -422,15 +481,20 @@ mod kernel {
                 match operation {
                     PointwiseOp::Brightness(brightness) => {
                         let factor = brightness.max(0.0);
-                        px[0] *= factor;
-                        px[1] *= factor;
-                        px[2] *= factor;
+                        for c in &mut px[0..3] {
+                            *c = acescct::from_linear(acescct::to_linear(*c) * factor);
+                        }
                     }
                     PointwiseOp::Saturation(saturation) => {
-                        let y = luma(px[0], px[1], px[2]);
-                        px[0] = y + saturation * (px[0] - y);
-                        px[1] = y + saturation * (px[1] - y);
-                        px[2] = y + saturation * (px[2] - y);
+                        let lin = [
+                            acescct::to_linear(px[0]),
+                            acescct::to_linear(px[1]),
+                            acescct::to_linear(px[2]),
+                        ];
+                        let y = acescct::luma(lin[0], lin[1], lin[2]);
+                        for i in 0..3 {
+                            px[i] = acescct::from_linear(y + saturation * (lin[i] - y));
+                        }
                     }
                 }
             }
@@ -560,7 +624,7 @@ mod kernel {
                     .round()
                     .clamp(0.0, (width - 1) as f32) as usize
             };
-            let y = to_slot(luma(px[0], px[1], px[2]));
+            let y = to_slot(display_p3::luma(px[0], px[1], px[2]));
             let r = to_slot(px[0]);
             let g = to_slot(px[1]);
             let b = to_slot(px[2]);
@@ -649,7 +713,7 @@ mod kernel {
         let mut density = vec![0u32; width * height];
         for row in from.rgba.chunks_exact(4 * from.width) {
             for (x, px) in row.chunks_exact(4).enumerate() {
-                let y = luma(px[0], px[1], px[2]);
+                let y = display_p3::luma(px[0], px[1], px[2]);
                 let scope_x = x * width / from.width;
                 let normalized_y = (y / 1.0).clamp(0.0, 1.0);
                 let scope_y = ((1.0 - normalized_y) * (height - 1) as f32).round() as usize;
@@ -666,9 +730,9 @@ mod kernel {
             for (x, p) in row.iter().enumerate() {
                 let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
                 let index = (y * width + x) * 4;
-                buffer.rgba[index] = density * 1.0;
-                buffer.rgba[index + 1] = density * 1.0;
-                buffer.rgba[index + 2] = density * 1.0;
+                buffer.rgba[index] = density;
+                buffer.rgba[index + 1] = density;
+                buffer.rgba[index + 2] = density;
             }
         }
 
@@ -685,12 +749,7 @@ mod kernel {
         let mut density = vec![0u32; width * height];
         for row in from.rgba.chunks_exact(4 * from.width) {
             for px in row.chunks_exact(4) {
-                let r = px[0] / 1.0;
-                let g = px[1] / 1.0;
-                let b = px[2] / 1.0;
-                let y = luma(r, g, b);
-                let cb = (b - y) / 1.8556;
-                let cr = (r - y) / 1.5748;
+                let (cb, cr) = display_p3::to_cb_cr(px[0], px[1], px[2]);
                 let x = center_x + cb * radius;
                 let y = center_y - cr * radius;
                 let x = x.round().clamp(0.0, (width - 1) as f32) as usize;
@@ -704,14 +763,24 @@ mod kernel {
         if max_density == 0 {
             return RenderedFrame::from_frame(buffer.to_frame());
         }
-        for (y, row) in density.chunks_exact(width).enumerate() {
-            for (x, p) in row.iter().enumerate() {
+        for (py, row) in density.chunks_exact(width).enumerate() {
+            for (px, p) in row.iter().enumerate() {
+                let cb = (px as f32 - center_x) / radius;
+                let cr = (center_y - py as f32) / radius;
+                let (r, g, b) = display_p3::from_cb_cr(0.5, cb, cr);
+                let (r, g, b) = (r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0));
+                // Improve brightness for readability
+                let max_channel = r.max(g).max(b);
+                let scale = if max_channel > f32::EPSILON {
+                    1.0 / max_channel
+                } else {
+                    0.0
+                };
                 let density = (1.0 + *p as f32).ln() / (1.0 + max_density as f32).ln();
-                // TODO: Support color it
-                let index = (y * width + x) * 4;
-                buffer.rgba[index] = density * 1.0;
-                buffer.rgba[index + 1] = density * 1.0;
-                buffer.rgba[index + 2] = density * 1.0;
+                let index = (py * width + px) * 4;
+                buffer.rgba[index] = r * density * scale;
+                buffer.rgba[index + 1] = g * density * scale;
+                buffer.rgba[index + 2] = b * density * scale;
             }
         }
 

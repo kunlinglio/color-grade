@@ -14,7 +14,8 @@ pub struct ColorGradeApp {
 
 impl ColorGradeApp {
     pub fn new() -> Self {
-        let _ = heifer::image_crate::register_image_decoder_hooks();
+        heifer::image_crate::register_image_decoder_hooks()
+            .ok_or_else(|| panic!("Refister HEIF decoder should not failed"));
         let thread_pool_builder = rayon::ThreadPoolBuilder::new()
             .num_threads(std::thread::available_parallelism().unwrap().get())
             .thread_name(|index| format!("Rayon worker for CG #{index}"));
