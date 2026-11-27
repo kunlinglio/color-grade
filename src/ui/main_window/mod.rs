@@ -88,6 +88,8 @@ impl MainWindow {
                     width: 1376.0.into(),
                 },
             })),
+            // Enable P3 mode to make GPUI activate color management
+            use_display_p3: true,
             titlebar: Some(TitlebarOptions {
                 title: Some("Color Grade".into()),
                 appears_transparent: true,

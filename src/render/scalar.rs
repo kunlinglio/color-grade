@@ -33,7 +33,9 @@ impl ScalarBackend {
         let output_transform = cfg
             .processor_display(
                 "ACEScct",
-                "sRGB - Display",
+                // Keep this in sync with the main window's `use_display_p3`
+                // setting.
+                "Display P3 - Display",
                 // TODO: Clarify scene-referred and display-referred and support gamut mapping
                 // "ACES 2.0 - SDR 100 nits (Rec.709)",
                 "Un-tone-mapped",
@@ -337,6 +339,25 @@ impl ScalarFrame {
             width: self.width,
             height: self.height,
         }
+    }
+}
+
+#[cfg(test)]
+mod color_management_tests {
+    use super::ScalarBackend;
+
+    #[test]
+    fn display_p3_output_preserves_neutral_and_alpha() {
+        let backend = ScalarBackend::new();
+        // ACEScct encoding of an 18% scene-linear neutral.
+        let mut pixel = [0.413_588_4_f32, 0.413_588_4, 0.413_588_4, 0.625];
+
+        backend.output_transform.apply_rgba_pixels(&mut pixel, 1, 4);
+
+        assert!(pixel.iter().all(|channel| channel.is_finite()));
+        assert!((pixel[0] - pixel[1]).abs() < 1e-5);
+        assert!((pixel[1] - pixel[2]).abs() < 1e-5);
+        assert!((pixel[3] - 0.625).abs() < f32::EPSILON);
     }
 }
 
