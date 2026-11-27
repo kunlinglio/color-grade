@@ -217,7 +217,8 @@ impl RenderOnce for ControlIcon {
             theme.colors.background.elevated
         };
         let hover_fg = if is_close {
-            theme.colors.text.inverse
+            // Use fix fg color
+            rgb(0xffffff)
         } else {
             theme.colors.text.primary
         };

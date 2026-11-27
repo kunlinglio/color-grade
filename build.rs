@@ -66,9 +66,35 @@ fn main() {
     }
 }
 
-/// ocio-sys builds OCIO under `target/<profile>/build/ocio-sys-<hash>/out/cmake-*/build`.
+/// Find the compile database that ocio-sys' bundled CMake build generated.
+/// The build lives in different places per platform:
+///   - Windows:    `%TEMP%/ocrs/<hash>/cmake-<generator>/build`
+///     (ocio-sys 0.4.0 relocates it here to dodge Windows' path-length limit)
+///   - macOS/Linux: `target/<profile>/build/ocio-sys-<hash>/out/cmake-<generator>/build`
 fn newest_compile_database() -> std::io::Result<Option<PathBuf>> {
-    // OUT_DIR is `<target>/<profile>/build/color-grade-<hash>/out`.
+    let mut newest: Option<(SystemTime, PathBuf)> = None;
+
+    // Windows location: `%TEMP%/ocrs/<hash>/cmake-*/build/compile_commands.json`.
+    let temp_root = env::temp_dir().join("ocrs");
+    if let Ok(hash_dirs) = fs::read_dir(&temp_root) {
+        for hash_dir in hash_dirs {
+            let hash_dir = hash_dir?;
+            if !hash_dir.path().is_dir() {
+                continue;
+            }
+            for gen_dir in fs::read_dir(hash_dir.path())? {
+                let gen_dir = gen_dir?;
+                if gen_dir.file_name().to_string_lossy().starts_with("cmake-") {
+                    consider(
+                        &mut newest,
+                        gen_dir.path().join("build").join("compile_commands.json"),
+                    )?;
+                }
+            }
+        }
+    }
+
+    // macOS/Linux (and older ocio-sys): the build lives under OUT_DIR.
     let out_dir = PathBuf::from(
         env::var_os("OUT_DIR").ok_or_else(|| std::io::Error::other("OUT_DIR is not set"))?,
     );
@@ -76,41 +102,49 @@ fn newest_compile_database() -> std::io::Result<Option<PathBuf>> {
         .ancestors()
         .nth(2)
         .ok_or_else(|| std::io::Error::other("OUT_DIR has no Cargo build directory"))?;
-
-    let mut newest: Option<(SystemTime, PathBuf)> = None;
-    for entry in fs::read_dir(build_root)? {
-        let entry = entry?;
-        if !entry.file_name().to_string_lossy().starts_with("ocio-sys-") {
-            continue;
-        }
-        let files = match fs::read_dir(entry.path().join("out")) {
-            Ok(files) => files,
-            // Cargo also creates ocio-sys directories for the build-script
-            // executable; those have no out directory.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        for file in files {
-            let file = file?;
-            if !file.file_name().to_string_lossy().starts_with("cmake-") {
+    if let Ok(entries) = fs::read_dir(build_root) {
+        for entry in entries {
+            let entry = entry?;
+            if !entry.file_name().to_string_lossy().starts_with("ocio-sys-") {
                 continue;
             }
-            let db = file.path().join("build/compile_commands.json");
-            let metadata = match fs::metadata(&db) {
-                Ok(metadata) => metadata,
+            let files = match fs::read_dir(entry.path().join("out")) {
+                Ok(files) => files,
+                // Cargo also creates ocio-sys directories for the build-script
+                // executable; those have no out directory.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            if !metadata.is_file() {
-                continue;
-            }
-            let modified = metadata.modified()?;
-            if newest.as_ref().is_none_or(|(time, _)| modified > *time) {
-                newest = Some((modified, db));
+            for file in files {
+                let file = file?;
+                if file.file_name().to_string_lossy().starts_with("cmake-") {
+                    consider(
+                        &mut newest,
+                        file.path().join("build").join("compile_commands.json"),
+                    )?;
+                }
             }
         }
     }
+
     Ok(newest.map(|(_, db)| db))
+}
+
+/// Track `db` as the newest candidate if it exists and is newer than the current one.
+fn consider(newest: &mut Option<(SystemTime, PathBuf)>, db: PathBuf) -> std::io::Result<()> {
+    let metadata = match fs::metadata(&db) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    let modified = metadata.modified()?;
+    if newest.as_ref().is_none_or(|(time, _)| modified > *time) {
+        *newest = Some((modified, db));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
