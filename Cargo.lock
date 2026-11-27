@@ -897,6 +897,7 @@ dependencies = [
  "async-channel",
  "futures",
  "gpui-kit",
+ "heifer",
  "image",
  "lcms2",
  "lru",
@@ -3070,6 +3071,47 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "heifer"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "858facbf2bd7e5ef8a4d5dc771662d7f98bb95c7b8db200f2d19176cb5f47ee7"
+dependencies = [
+ "heifer-hevc-dec",
+ "heifer-hevc-enc",
+ "heifer-isobmff",
+ "image",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "heifer-hevc-dec"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31a3eb2db4a97600c0e7618ab0e2e9e5594ed24c81b6d8ca42f554181e944b54"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "heifer-hevc-enc"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42bb40ba5cff91e01d472841dd51ccbd16e7469a3426f9930e0b1a161ef0ad4d"
+dependencies = [
+ "heifer-hevc-dec",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "heifer-isobmff"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a306e5f819d9f2bf69ac33bcba29e7b00b63c4e0544b7804fbf031ceff780d2"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "hermit-abi"

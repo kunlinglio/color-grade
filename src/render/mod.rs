@@ -66,24 +66,28 @@ impl Frame {
 }
 
 pub struct MediaIcc {
-    description: Option<String>,
     raw: Vec<u8>,
+    device_class: lcms2::ProfileClassSignature,
 }
 
 impl MediaIcc {
     pub fn from_image(image: &mut impl ImageDecoder) -> anyhow::Result<Option<Self>> {
         let raw = image.icc_profile().context("Failed to read icc profile")?;
-        match raw {
-            Some(raw) => {
-                let profile = lcms2::Profile::new_icc(&raw).context("Failed to parse icc bytes")?;
-                Ok(Some(Self {
-                    description: profile.info(lcms2::InfoType::Description, lcms2::Locale::none()),
-                    raw,
-                }))
-            }
-            None => Ok(None),
-        }
+        raw.map(Self::from_raw).transpose()
     }
+
+    fn from_raw(raw: Vec<u8>) -> anyhow::Result<Self> {
+        let profile = lcms2::Profile::new_icc(&raw).context("Failed to parse icc bytes")?;
+        Ok(Self {
+            device_class: profile.device_class(),
+            raw,
+        })
+    }
+
+    fn is_display_referred(&self) -> bool {
+        self.device_class == lcms2::ProfileClassSignature::DisplayClass
+    }
+
     fn hash(&self) -> u128 {
         let mut hasher = xxhash_rust::xxh3::Xxh3::new();
         for slice in self.raw.chunks(64 * 1024) {
