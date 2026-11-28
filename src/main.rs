@@ -1,7 +1,7 @@
 use color_grade::app::ColorGradeApp;
 use color_grade::logger;
 
-use mimalloc::MiMalloc;
+use mimalloc_safe::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
