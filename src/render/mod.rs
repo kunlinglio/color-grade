@@ -4,8 +4,8 @@ mod render_list;
 pub use render_list::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 mod render_backend;
 pub use render_backend::{BackendFrame, RenderBackend, ScopeGraph};
-mod scalar;
-pub use scalar::ScalarBackend;
+mod scalar_backend;
+pub use scalar_backend::ScalarBackend;
 mod cpu_kernel;
 
 use std::path::PathBuf;
