@@ -11,8 +11,11 @@ use rayon::ThreadPool;
 use crate::media::MediaManager;
 use crate::media::MediaSubscription;
 use crate::project::session::SessionClient;
-use crate::render::Renderer;
-use crate::render::{BackendFrame, FrameStream, RenderedFrame, ScopeGraph};
+use crate::render::RenderBackend;
+use crate::render::{
+    BackendFrame, DecodedImage, FrameStream, RenderList, RenderedFrame, ScalarBackend, Scheduler,
+    ScopeGraph,
+};
 use crate::thumbnail::ThumbnailManager;
 use crate::thumbnail::ThumbnailManagerClient;
 
@@ -22,21 +25,33 @@ use super::session::Session;
 pub struct ProjectRuntime {
     opened: Option<Session>,
     // Services
-    renderer: Renderer,
     media_manager: MediaManager,
     thumbnail_manager: ThumbnailManager,
+    /// Scheduler to handle frame render requests
+    render_service: Scheduler<(RenderList, Arc<DecodedImage>), (BackendFrame, Arc<RenderedFrame>)>,
+    /// Scheduler to handle scope render requests
+    scope_service: Scheduler<(BackendFrame, usize, usize), ScopeGraph>,
 }
 
 impl ProjectRuntime {
     pub fn new(project_path: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let renderer = Renderer::new(thread_pool.clone());
+        let render_backend = Arc::new(ScalarBackend::new());
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
-        let thumbnail_manager = ThumbnailManager::new(thread_pool.clone());
+        let thumbnail_manager = ThumbnailManager::new(thread_pool.clone(), render_backend.clone());
+        let render_service = Scheduler::new(thread_pool.clone(), {
+            let render_backend = render_backend.clone();
+            move |(list, frame)| render_backend.handle_render(list, frame)
+        });
+        let scope_service = Scheduler::new(thread_pool, {
+            let render_backend = render_backend.clone();
+            move |(from, width, height)| render_backend.handle_scope(from, width, height)
+        });
         ProjectRuntime {
             opened: None,
-            renderer,
             media_manager,
             thumbnail_manager,
+            render_service,
+            scope_service,
         }
     }
 
@@ -78,7 +93,11 @@ impl ProjectRuntime {
                     _ = self.thumbnail_manager.handle_event().fuse() => {},
                     _ = async {
                         match &mut self.opened {
-                            Some(session) => session.handle_event(&mut self.renderer).await,
+                            Some(session) => session.handle_event(
+                                |render_list, decoded| {
+                                    self.render_service.submit((render_list, decoded));
+                                }
+                            ).await,
                             None => std::future::pending::<()>().await,
                         }
                     }
@@ -92,15 +111,15 @@ impl ProjectRuntime {
         // Inside this method, we can ignore all the send/recv failure, since the runtime may lives longer than UI
         match cmd {
             Command::SubscribeFrameStream(tx) => {
-                let frame_stream = self.renderer.subscribe();
+                let frame_stream = self.render_service.subscribe();
                 let _ = tx.send(frame_stream);
             }
             Command::SubscribeScope(tx) => {
-                let scope_stream = self.renderer.subscribe_scope();
+                let scope_stream = self.scope_service.subscribe();
                 let _ = tx.send(scope_stream);
             }
             Command::RequestScope(from, width, height) => {
-                self.renderer.request_scope(from, width, height);
+                self.scope_service.submit((from, width, height));
             }
             Command::SubscribeMedia(tx) => {
                 let updater = self.media_manager.subscribe();
@@ -115,7 +134,9 @@ impl ProjectRuntime {
                     todo!("Handle media open failed");
                 };
                 // Trigger refresh FrameStreams
-                session.render(&mut self.renderer);
+                session.render(|render_list, decoded| {
+                    self.render_service.submit((render_list, decoded));
+                });
                 self.opened = Some(session);
                 let _ = tx.send(session_client);
             }
@@ -193,6 +214,7 @@ impl ProjectRuntimeHandler {
 
 enum Command {
     // Subscribe commands: Bringing a Sender
+    // TODO: Many subscribe only called once, may be we can delete these commands.
     SubscribeFrameStream(oneshot::Sender<FrameStream<(BackendFrame, Arc<RenderedFrame>)>>),
     SubscribeScope(oneshot::Sender<FrameStream<ScopeGraph>>),
     SubscribeMedia(oneshot::Sender<MediaSubscription>),

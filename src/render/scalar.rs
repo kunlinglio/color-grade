@@ -7,15 +7,15 @@ use ocio_rs::transform::{
 };
 use ocio_rs::{Config, ConfigIOProxy, StaticCPUProcessor, TransformDirection};
 
+use super::render_backend::RenderBackend;
+use super::render_backend::ScopeGraph;
 use super::render_list::{Op, RenderList, Slot};
-use super::renderer::RendererBackend;
-use super::renderer::ScopeGraph;
-use super::{BackendFrame, Frame, MediaIcc, RenderedFrame};
+use super::{BackendFrame, DecodedImage, MediaIcc, RenderedFrame};
 
 /// The most basic render backend. It deliberately favors correctness over
 /// performance and serves as the reference implementation for regression tests
 /// against optimized backends.
-pub(super) struct ScalarBackend {
+pub struct ScalarBackend {
     input_processor_cache: Mutex<HashMap<u128, Arc<StaticCPUProcessor>>>,
     fallback_input_processor: Arc<StaticCPUProcessor>,
     output_transform: StaticCPUProcessor,
@@ -187,12 +187,7 @@ impl ScalarBackend {
         Ok(cpu)
     }
 
-    fn execute(
-        &self,
-        list: RenderList,
-        from: &Frame,
-        icc: &Option<MediaIcc>,
-    ) -> anyhow::Result<ScalarFrame> {
+    fn execute(&self, list: RenderList, from: &DecodedImage) -> anyhow::Result<ScalarFrame> {
         list.verify().context("invalid render list")?;
         let RenderList {
             slot_count,
@@ -212,7 +207,7 @@ impl ScalarBackend {
         })?;
         let mut input = ScalarFrame::from_frame(from);
         let pixel_num = input.rgba.len() / 4;
-        let input_transform = self.get_input_processor(icc).unwrap_or_else(|e| {
+        let input_transform = self.get_input_processor(&from.icc).unwrap_or_else(|e| {
             error!("{e:#}");
             self.fallback_input_processor.clone()
         });
@@ -334,16 +329,16 @@ fn write_slot(
     Ok(())
 }
 
-impl RendererBackend for ScalarBackend {
+impl RenderBackend for ScalarBackend {
     fn handle_render(
         &self,
         list: RenderList,
-        from: Arc<(Frame, Option<MediaIcc>)>,
+        from: Arc<DecodedImage>,
     ) -> (BackendFrame, Arc<RenderedFrame>) {
         let buffer = self
-            .execute(list, &from.0, &from.1)
+            .execute(list, &from)
             .unwrap_or_else(|err| panic!("scalar backend failed to render: {err:#}"));
-        let rendered = RenderedFrame::from_frame(buffer.to_frame());
+        let rendered = kernel::render_frame(&buffer, true);
         (BackendFrame::new(buffer), Arc::new(rendered))
     }
 
@@ -358,6 +353,20 @@ impl RendererBackend for ScalarBackend {
             y_histogram: Arc::new(y_histogram),
             rgb_histogram: Arc::new(rgb_histogram),
         }
+    }
+
+    fn render_thumbnail(&self, from: Arc<DecodedImage>) -> Arc<RenderedFrame> {
+        let mut buffer = ScalarFrame::from_frame(&from);
+        let pixel_num = buffer.rgba.len() / 4;
+        let input_transform = self.get_input_processor(&from.icc).unwrap_or_else(|e| {
+            error!("{e:#}");
+            self.fallback_input_processor.clone()
+        });
+        input_transform.apply_rgba_pixels(&mut buffer.rgba, pixel_num as i64, 4);
+        self.output_transform
+            .apply_rgba_pixels(&mut buffer.rgba, pixel_num as i64, 4);
+        let rendered = kernel::render_frame(&buffer, true);
+        Arc::new(rendered)
     }
 }
 
@@ -382,32 +391,22 @@ impl ScalarFrame {
         }
     }
     /// Convert to f32 and normalize
-    fn from_frame(frame: &Frame) -> Self {
+    fn from_frame(frame: &DecodedImage) -> Self {
         ScalarFrame {
             rgba: frame
                 .rgba
                 .iter()
-                .map(|&e| e as f32 / u8::MAX as f32)
+                .map(|&e| e as f32 / u16::MAX as f32)
                 .collect(),
             width: frame.width,
             height: frame.height,
         }
     }
-    /// Convert back to u8 and de-normalize
-    fn to_frame(&self) -> Frame {
-        Frame {
-            rgba: self
-                .rgba
-                .iter()
-                .map(|&e| (e.clamp(0.0, 1.0) * u8::MAX as f32).round() as u8)
-                .collect(),
-            width: self.width,
-            height: self.height,
-        }
-    }
 }
 
 mod kernel {
+    use xxhash_rust::xxh3::xxh3_64;
+
     use super::ScalarFrame;
     use crate::render::{BlendMode, PointwiseOp, RenderedFrame};
 
@@ -701,8 +700,8 @@ mod kernel {
             });
         }
         (
-            RenderedFrame::from_frame(y_buffer.to_frame()),
-            RenderedFrame::from_frame(rgb_buffer.to_frame()),
+            render_frame(&y_buffer, false),
+            render_frame(&rgb_buffer, false),
         )
     }
 
@@ -724,7 +723,7 @@ mod kernel {
         let max_density = density.iter().copied().max().unwrap_or(0);
         let mut buffer = ScalarFrame::new(width, height);
         if max_density == 0 {
-            return RenderedFrame::from_frame(buffer.to_frame());
+            return render_frame(&buffer, false);
         }
         for (y, row) in density.chunks_exact(width).enumerate() {
             for (x, p) in row.iter().enumerate() {
@@ -736,7 +735,7 @@ mod kernel {
             }
         }
 
-        RenderedFrame::from_frame(buffer.to_frame())
+        render_frame(&buffer, false)
     }
 
     pub(super) fn vectorscope(from: &ScalarFrame, width: usize, height: usize) -> RenderedFrame {
@@ -761,7 +760,7 @@ mod kernel {
         let mut buffer = ScalarFrame::new(width, height);
         let max_density = density.iter().copied().max().unwrap_or(0);
         if max_density == 0 {
-            return RenderedFrame::from_frame(buffer.to_frame());
+            return render_frame(&buffer, false);
         }
         for (py, row) in density.chunks_exact(width).enumerate() {
             for (px, p) in row.iter().enumerate() {
@@ -784,6 +783,48 @@ mod kernel {
             }
         }
 
-        RenderedFrame::from_frame(buffer.to_frame())
+        render_frame(&buffer, false)
+    }
+
+    /// Rendered a internal ScalarFrame into a RenderedFrame for screen.
+    /// Since RenderedFrame uses 8 bit, we need to add some noise.
+    pub(super) fn render_frame(frame: &ScalarFrame, add_noise: bool) -> RenderedFrame {
+        let mut buffer = vec![0u8; frame.width * frame.height * 4];
+        #[inline(always)]
+        fn convert(point: f32, noise: f32) -> u8 {
+            (point.clamp(0.0, 1.0) * 255.0 + noise)
+                .round()
+                .clamp(0.0, 255.0) as u8
+        }
+        if add_noise {
+            for (index, px) in frame.rgba.chunks_exact(4).enumerate() {
+                let noise = tpdf_noise(index as u64);
+                buffer[index * 4] = convert(px[2], noise); // B
+                buffer[index * 4 + 1] = convert(px[1], noise); // G
+                buffer[index * 4 + 2] = convert(px[0], noise); // R
+                buffer[index * 4 + 3] = convert(px[3], noise); // A
+            }
+        } else {
+            for (index, px) in frame.rgba.chunks_exact(4).enumerate() {
+                buffer[index * 4] = convert(px[2], 0.0); // B
+                buffer[index * 4 + 1] = convert(px[1], 0.0); // G
+                buffer[index * 4 + 2] = convert(px[0], 0.0); // R
+                buffer[index * 4 + 3] = convert(px[3], 0.0); // A
+            }
+        }
+        RenderedFrame {
+            width: frame.width,
+            height: frame.height,
+            bgra: buffer,
+        }
+    }
+
+    #[inline(always)]
+    fn tpdf_noise(key: u64) -> f32 {
+        let hash = xxh3_64(&key.to_le_bytes());
+
+        let u1 = (hash & 0xffff) as f32 * (1.0 / 65536.0);
+        let u2 = ((hash >> 16) & 0xffff) as f32 * (1.0 / 65536.0);
+        u1 + u2 - 1.0
     }
 }

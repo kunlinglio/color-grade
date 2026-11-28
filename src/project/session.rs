@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::channel::mpsc;
-use image::DynamicImage;
 
-use crate::render::{Frame, MediaIcc, Renderer};
+use crate::render::{DecodedImage, RenderList};
 
 use super::{Workflow, WorkflowDiff};
 
@@ -14,38 +13,25 @@ pub(super) struct Session {
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     /// The ONLY SOURCE OF TRUTH of workflow
     workflow: Workflow,
-    decoded: Arc<(Frame, Option<MediaIcc>)>,
+    decoded: Arc<DecodedImage>,
 }
 
 impl Session {
     pub fn new(path: PathBuf) -> anyhow::Result<(Self, SessionClient)> {
-        let mut decoder = image::ImageReader::open(&path)
-            .with_context(|| format!("Failed to open image {}", path.display()))?
-            .with_guessed_format()
-            .with_context(|| format!("Failed to guess format for {}", path.display()))?
-            .into_decoder()
-            .with_context(|| format!("Failed to decode image {}", path.display()))?;
-        let icc = MediaIcc::from_image(&mut decoder)
-            .with_context(|| format!("Failed to read icc profile for {}", path.display()))?;
-        let img = DynamicImage::from_decoder(decoder)?;
-        let rgba = img.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        let decoded_frame = Arc::new((
-            Frame::new(width as usize, height as usize, rgba.to_vec()),
-            icc,
-        ));
+        let decoded = DecodedImage::decode_from(&path)
+            .with_context(|| format!("Failed to create Session from {}", path.display()))?;
         let (cmd_tx, cmd_rx) = mpsc::unbounded();
         let workflow = Workflow::default();
         let session = Session {
             cmd_rx,
             workflow: workflow.clone(),
-            decoded: decoded_frame,
+            decoded: Arc::new(decoded),
         };
         let client = SessionClient { cmd_tx, workflow };
         Ok((session, client))
     }
 
-    pub async fn handle_event(&mut self, renderer: &mut Renderer) {
+    pub async fn handle_event(&mut self, on_render: impl Fn(RenderList, Arc<DecodedImage>)) {
         let Ok(cmd) = self.cmd_rx.recv().await else {
             return;
         };
@@ -56,17 +42,16 @@ impl Session {
                     .apply_diff(&diff)
                     .expect("The client has checked diff, here should not failed");
                 if need_render {
-                    self.render(renderer);
+                    self.render(on_render);
                 }
             }
         }
     }
-
-    pub fn render(&self, renderer: &mut Renderer) {
+    pub fn render(&self, renderer: impl Fn(RenderList, Arc<DecodedImage>)) {
         // TODO: Determine whether enable optimize by outer context
         match self.workflow.compile(true) {
             Ok(render_list) => {
-                renderer.render(render_list, self.decoded.clone());
+                renderer(render_list, self.decoded.clone());
             }
             Err(e) => {
                 warn!("Compile error: {e}, stop render it")

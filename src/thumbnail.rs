@@ -4,13 +4,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures::channel::{mpsc, oneshot};
-use image::GenericImageView;
 use lru::LruCache;
 use rayon::ThreadPool;
 
 use crate::media::Media;
 use crate::media::MediaHash;
-use crate::render::RenderedFrame;
+use crate::render::{DecodedImage, RenderBackend, RenderedFrame};
 
 const CACHE_CAPACITY: usize = 128;
 
@@ -51,7 +50,7 @@ impl ThumbnailSize {
     }
 }
 pub struct Thumbnail {
-    pub frame: RenderedFrame,
+    pub frame: Arc<RenderedFrame>,
 }
 
 struct Cache {
@@ -71,6 +70,7 @@ impl Cache {
 pub struct ThumbnailManager {
     cache: Arc<Mutex<Cache>>,
     thread_pool: Arc<ThreadPool>,
+    render_backend: Arc<dyn RenderBackend>,
 
     client_rx: mpsc::UnboundedReceiver<(
         Arc<Media>,
@@ -87,12 +87,13 @@ pub struct ThumbnailManager {
 }
 
 impl ThumbnailManager {
-    pub fn new(thread_pool: Arc<ThreadPool>) -> Self {
+    pub fn new(thread_pool: Arc<ThreadPool>, render_backend: Arc<dyn RenderBackend>) -> Self {
         let (client_tx, client_rx) = mpsc::unbounded();
         ThumbnailManager {
             cache: Arc::new(Mutex::new(Cache::new(
                 NonZero::new(CACHE_CAPACITY).unwrap(),
             ))),
+            render_backend,
             thread_pool,
             client_rx,
             client_tx,
@@ -123,8 +124,9 @@ impl ThumbnailManager {
             cache_guard.in_flight.insert(key, vec![tx]);
         };
         let cache = self.cache.clone();
+        let render_backend = self.render_backend.clone();
         self.thread_pool.spawn(move || {
-            let res = load_thumbnail(&media.path, size);
+            let res = load_thumbnail(&media.path, size, render_backend);
             let mut cache_guard = cache.lock().unwrap();
             let waiters = cache_guard.in_flight.remove(&key).unwrap_or_default();
             let reply = match res {
@@ -168,23 +170,16 @@ impl ThumbnailManagerClient {
     }
 }
 
-fn load_thumbnail(path: &PathBuf, size: ThumbnailSize) -> anyhow::Result<Thumbnail> {
-    let img = image::ImageReader::open(path)?
-        .with_guessed_format()?
-        .decode()?;
-
-    let (w, h) = img.dimensions();
-    let max_size = size.pixels();
-
-    let img = if w > max_size || h > max_size {
-        img.thumbnail(max_size, max_size)
-    } else {
-        img
-    };
-
-    let rgba = img.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    Ok(Thumbnail {
-        frame: RenderedFrame::from_rgba(width as usize, height as usize, rgba.to_vec()),
-    })
+fn load_thumbnail(
+    path: &PathBuf,
+    size: ThumbnailSize,
+    backend: Arc<dyn RenderBackend>,
+) -> anyhow::Result<Thumbnail> {
+    let decoded = Arc::new(DecodedImage::decode_thumb_from(
+        &path,
+        size.pixels(),
+        size.pixels(),
+    )?);
+    let frame = backend.render_thumbnail(decoded);
+    Ok(Thumbnail { frame })
 }
