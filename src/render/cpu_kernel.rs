@@ -5,27 +5,29 @@ use super::{BlendMode, PointwiseOp, RenderedFrame};
 
 /// Intermediate frame representation used between processing steps.
 #[derive(Clone, Debug)]
-pub(super) struct CpuFrame {
+pub(super) struct CPUFrame {
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) rgba: Vec<f32>,
 }
 
-impl CpuFrame {
+impl CPUFrame {
     pub(super) fn new(width: usize, height: usize) -> Self {
-        let mut rgba = vec![0.0f32; width * height * 4];
-        for px in rgba.chunks_exact_mut(4) {
-            px[3] = 1.0; // let alpha = 1
-        }
-        CpuFrame {
+        let rgba = vec![0.0f32; width * height * 4];
+        CPUFrame {
             width,
             height,
-            rgba: rgba,
+            rgba,
+        }
+    }
+    pub(super) fn set_alpha(&mut self) {
+        for px in self.rgba.chunks_exact_mut(4) {
+            px[3] = 1.0; // let alpha = 1
         }
     }
     /// Convert to f32 and normalize
     pub(super) fn from_frame(frame: &DecodedImage) -> Self {
-        CpuFrame {
+        CPUFrame {
             rgba: frame
                 .rgba
                 .iter()
@@ -101,8 +103,8 @@ mod display_p3 {
     }
 }
 
-pub(super) fn apply_pointwise(buffer: &mut CpuFrame, operations: &[PointwiseOp]) {
-    for px in buffer.rgba.chunks_exact_mut(4) {
+pub(super) fn apply_pointwise(buffer: &mut [f32], operations: &[PointwiseOp]) {
+    for px in buffer.chunks_exact_mut(4) {
         for operation in operations {
             match operation {
                 PointwiseOp::Brightness(brightness) => {
@@ -127,40 +129,29 @@ pub(super) fn apply_pointwise(buffer: &mut CpuFrame, operations: &[PointwiseOp])
     }
 }
 
-pub(super) fn mix(base: &CpuFrame, branches: &[&CpuFrame]) -> anyhow::Result<CpuFrame> {
+pub(super) fn mix(base: &[f32], branches: &[&[f32]], output: &mut [f32]) -> anyhow::Result<()> {
     anyhow::ensure!(branches.len() >= 2, "Mix requires at least two branches");
+    anyhow::ensure!(
+        output.len() % 4 == 0
+            && base.len() == output.len()
+            && branches.iter().all(|b| b.len() == output.len()),
+        "mix buffers must have the same length"
+    );
 
-    for branch in branches {
-        anyhow::ensure!(
-            branch.width == base.width && branch.height == base.height,
-            "cannot mix frames of different sizes: \
-             base is {}x{}, branch is {}x{}",
-            base.width,
-            base.height,
-            branch.width,
-            branch.height,
-        );
-    }
-
-    let mut output = base.clone();
-
-    for branch in branches {
-        for ((output_px, base_px), branch_px) in output
-            .rgba
-            .chunks_exact_mut(4)
-            .zip(base.rgba.chunks_exact(4))
-            .zip(branch.rgba.chunks_exact(4))
-        {
-            output_px[0] += branch_px[0] - base_px[0];
-            output_px[1] += branch_px[1] - base_px[1];
-            output_px[2] += branch_px[2] - base_px[2];
-
-            // TODO: Support mix alpha channel
-            output_px[3] = base_px[3];
+    for (i, out_px) in output.chunks_exact_mut(4).enumerate() {
+        let index = i * 4;
+        out_px[0] = base[index];
+        out_px[1] = base[index + 1];
+        out_px[2] = base[index + 2];
+        out_px[3] = base[index + 3];
+        for branch in branches {
+            out_px[0] += branch[index] - base[index];
+            out_px[1] += branch[index + 1] - base[index + 1];
+            out_px[2] += branch[index + 2] - base[index + 2];
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
 #[inline]
@@ -186,25 +177,15 @@ fn blend_channel(background: f32, foreground: f32, mode: BlendMode) -> f32 {
 
 /// Composite straight-alpha `foreground` over `background` using `mode`.
 pub(super) fn merge(
-    foreground: &CpuFrame,
-    background: &CpuFrame,
+    foreground: &[f32],
+    background: &[f32],
     mode: BlendMode,
-) -> anyhow::Result<CpuFrame> {
-    anyhow::ensure!(
-        foreground.width == background.width && foreground.height == background.height,
-        "cannot merge frames of different sizes: {}x{} and {}x{}",
-        foreground.width,
-        foreground.height,
-        background.width,
-        background.height
-    );
-
-    let mut output = CpuFrame::new(background.width, background.height);
-    for ((output_px, background_px), foreground_px) in output
-        .rgba
+    to: &mut [f32],
+) -> anyhow::Result<()> {
+    for ((output_px, background_px), foreground_px) in to
         .chunks_exact_mut(4)
-        .zip(background.rgba.chunks_exact(4))
-        .zip(foreground.rgba.chunks_exact(4))
+        .zip(background.chunks_exact(4))
+        .zip(foreground.chunks_exact(4))
     {
         let background_alpha = background_px[3].clamp(0.0, 1.0);
         let foreground_alpha = foreground_px[3].clamp(0.0, 1.0);
@@ -226,11 +207,11 @@ pub(super) fn merge(
         }
         output_px[3] = output_alpha;
     }
-    Ok(output)
+    Ok(())
 }
 
 pub(super) fn histogram(
-    from: &CpuFrame,
+    from: &CPUFrame,
     width: usize,
     height: usize,
 ) -> (RenderedFrame, RenderedFrame) {
@@ -267,8 +248,10 @@ pub(super) fn histogram(
         .max()
         .unwrap_or(0);
     let y_max_height = y_hist.iter().copied().max().unwrap_or(0);
-    let mut rgb_buffer = CpuFrame::new(width, height);
-    let mut y_buffer = CpuFrame::new(width, height);
+    let mut rgb_buffer = CPUFrame::new(width, height);
+    let mut y_buffer = CPUFrame::new(width, height);
+    rgb_buffer.set_alpha();
+    y_buffer.set_alpha();
 
     // 2. calculate bar height for each channel
     if rgb_max_height != 0 {
@@ -323,13 +306,20 @@ pub(super) fn histogram(
             }
         });
     }
-    (
-        render_frame(&y_buffer, false),
-        render_frame(&rgb_buffer, false),
-    )
+    let y_rendered = {
+        let mut rendered = RenderedFrame::new(y_buffer.width, y_buffer.height);
+        render_frame(&y_buffer.rgba, false, &mut rendered.bgra, 0);
+        rendered
+    };
+    let rgb_rendered = {
+        let mut rendered = RenderedFrame::new(rgb_buffer.width, rgb_buffer.height);
+        render_frame(&rgb_buffer.rgba, false, &mut rendered.bgra, 0);
+        rendered
+    };
+    (y_rendered, rgb_rendered)
 }
 
-pub(super) fn waveform(from: &CpuFrame, width: usize, height: usize) -> RenderedFrame {
+pub(super) fn waveform(from: &CPUFrame, width: usize, height: usize) -> RenderedFrame {
     assert!(width > 0 && height > 0);
     // TODO: Support RGB waveform
     // Analyze
@@ -345,9 +335,12 @@ pub(super) fn waveform(from: &CpuFrame, width: usize, height: usize) -> Rendered
     }
     // Draw
     let max_density = density.iter().copied().max().unwrap_or(0);
-    let mut buffer = CpuFrame::new(width, height);
+    let mut buffer = CPUFrame::new(width, height);
+    buffer.set_alpha();
     if max_density == 0 {
-        return render_frame(&buffer, false);
+        let mut rendered = RenderedFrame::new(buffer.width, buffer.height);
+        render_frame(&buffer.rgba, false, &mut rendered.bgra, 0);
+        return rendered;
     }
     for (y, row) in density.chunks_exact(width).enumerate() {
         for (x, p) in row.iter().enumerate() {
@@ -359,10 +352,12 @@ pub(super) fn waveform(from: &CpuFrame, width: usize, height: usize) -> Rendered
         }
     }
 
-    render_frame(&buffer, false)
+    let mut rendered = RenderedFrame::new(buffer.width, buffer.height);
+    render_frame(&buffer.rgba, false, &mut rendered.bgra, 0);
+    return rendered;
 }
 
-pub(super) fn vectorscope(from: &CpuFrame, width: usize, height: usize) -> RenderedFrame {
+pub(super) fn vectorscope(from: &CPUFrame, width: usize, height: usize) -> RenderedFrame {
     assert!(width > 0 && height > 0);
     // Analyze
     let size = width.min(height);
@@ -381,10 +376,13 @@ pub(super) fn vectorscope(from: &CpuFrame, width: usize, height: usize) -> Rende
         }
     }
     // Draw
-    let mut buffer = CpuFrame::new(width, height);
+    let mut buffer = CPUFrame::new(width, height);
+    buffer.set_alpha();
     let max_density = density.iter().copied().max().unwrap_or(0);
     if max_density == 0 {
-        return render_frame(&buffer, false);
+        let mut rendered = RenderedFrame::new(buffer.width, buffer.height);
+        render_frame(&buffer.rgba, false, &mut rendered.bgra, 0);
+        return rendered;
     }
     for (py, row) in density.chunks_exact(width).enumerate() {
         for (px, p) in row.iter().enumerate() {
@@ -406,14 +404,14 @@ pub(super) fn vectorscope(from: &CpuFrame, width: usize, height: usize) -> Rende
             buffer.rgba[index + 2] = b * density * scale;
         }
     }
-
-    render_frame(&buffer, false)
+    let mut rendered = RenderedFrame::new(buffer.width, buffer.height);
+    render_frame(&buffer.rgba, false, &mut rendered.bgra, 0);
+    rendered
 }
 
 /// Rendered a internal ScalarFrame into a RenderedFrame for screen.
 /// Since RenderedFrame uses 8 bit, we need to add some noise.
-pub(super) fn render_frame(frame: &CpuFrame, add_noise: bool) -> RenderedFrame {
-    let mut buffer = vec![0u8; frame.width * frame.height * 4];
+pub(super) fn render_frame(frame: &[f32], add_noise: bool, to: &mut [u8], index_offset: usize) {
     #[inline(always)]
     fn convert(point: f32, noise: f32) -> u8 {
         (point.clamp(0.0, 1.0) * 255.0 + noise)
@@ -421,25 +419,20 @@ pub(super) fn render_frame(frame: &CpuFrame, add_noise: bool) -> RenderedFrame {
             .clamp(0.0, 255.0) as u8
     }
     if add_noise {
-        for (index, px) in frame.rgba.chunks_exact(4).enumerate() {
-            let noise = tpdf_noise(index as u64);
-            buffer[index * 4] = convert(px[2], noise); // B
-            buffer[index * 4 + 1] = convert(px[1], noise); // G
-            buffer[index * 4 + 2] = convert(px[0], noise); // R
-            buffer[index * 4 + 3] = convert(px[3], noise); // A
+        for (index, px) in frame.chunks_exact(4).enumerate() {
+            let noise = tpdf_noise((index + index_offset) as u64);
+            to[index * 4] = convert(px[2], noise); // B
+            to[index * 4 + 1] = convert(px[1], noise); // G
+            to[index * 4 + 2] = convert(px[0], noise); // R
+            to[index * 4 + 3] = convert(px[3], noise); // A
         }
     } else {
-        for (index, px) in frame.rgba.chunks_exact(4).enumerate() {
-            buffer[index * 4] = convert(px[2], 0.0); // B
-            buffer[index * 4 + 1] = convert(px[1], 0.0); // G
-            buffer[index * 4 + 2] = convert(px[0], 0.0); // R
-            buffer[index * 4 + 3] = convert(px[3], 0.0); // A
+        for (index, px) in frame.chunks_exact(4).enumerate() {
+            to[index * 4] = convert(px[2], 0.0); // B
+            to[index * 4 + 1] = convert(px[1], 0.0); // G
+            to[index * 4 + 2] = convert(px[0], 0.0); // R
+            to[index * 4 + 3] = convert(px[3], 0.0); // A
         }
-    }
-    RenderedFrame {
-        width: frame.width,
-        height: frame.height,
-        bgra: buffer,
     }
 }
 

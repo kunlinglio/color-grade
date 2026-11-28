@@ -11,10 +11,9 @@ use rayon::ThreadPool;
 use crate::media::MediaManager;
 use crate::media::MediaSubscription;
 use crate::project::session::SessionClient;
-use crate::render::RenderBackend;
+use crate::render;
 use crate::render::{
-    BackendFrame, DecodedImage, FrameStream, RenderList, RenderedFrame, ScalarBackend, Scheduler,
-    ScopeGraph,
+    BackendFrame, DecodedImage, FrameStream, RenderList, RenderedFrame, Scheduler, ScopeGraph,
 };
 use crate::thumbnail::ThumbnailManager;
 use crate::thumbnail::ThumbnailManagerClient;
@@ -35,7 +34,7 @@ pub struct ProjectRuntime {
 
 impl ProjectRuntime {
     pub fn new(project_path: PathBuf, thread_pool: Arc<ThreadPool>) -> Self {
-        let render_backend = Arc::new(ScalarBackend::new());
+        let render_backend = render::new_backend(thread_pool.clone());
         let media_manager = MediaManager::new(project_path.clone(), thread_pool.clone());
         let thumbnail_manager = ThumbnailManager::new(thread_pool.clone(), render_backend.clone());
         let render_service = Scheduler::new(thread_pool.clone(), {

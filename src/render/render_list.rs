@@ -1,3 +1,5 @@
+use std::fmt;
+
 use anyhow::Context;
 use strum::EnumIter;
 
@@ -39,8 +41,17 @@ impl Slot {
     pub fn id(&self) -> u32 {
         self.0
     }
+    pub fn to_index(&self) -> usize {
+        self.0 as usize
+    }
     fn inside(&self, slot_count: usize) -> bool {
         (self.0 as usize) < slot_count
+    }
+}
+
+impl fmt::Display for Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "%{}", self.0)
     }
 }
 
@@ -59,6 +70,23 @@ pub enum BlendMode {
     Lighten,
 }
 
+impl fmt::Display for BlendMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            BlendMode::Normal => "normal",
+            BlendMode::Add => "add",
+            BlendMode::Subtract => "subtract",
+            BlendMode::Multiply => "multiply",
+            BlendMode::Screen => "screen",
+            BlendMode::Overlay => "overlay",
+            BlendMode::Difference => "difference",
+            BlendMode::Darken => "darken",
+            BlendMode::Lighten => "lighten",
+        };
+        f.write_str(name)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PointwiseOp {
     Brightness(f32),
@@ -67,10 +95,6 @@ pub enum PointwiseOp {
 
 #[derive(Debug)]
 pub enum Op {
-    Copy {
-        from: Slot,
-        to: Slot,
-    },
     /// TODO: Make input and output convert a legal pointwise op.
     ///       e.g. u8 -> f32 ... f32 -> u8
     Pointwise {
@@ -105,11 +129,6 @@ impl RenderList {
 
     fn verify_op(&self, op: &Op) -> anyhow::Result<()> {
         match op {
-            Op::Copy { from, to } => {
-                self.check_slot(from, "from")?;
-                self.check_slot(to, "to")?;
-                anyhow::ensure!(from != to, "Copy op's 'from' and 'to' are same slot")
-            }
             Op::Pointwise {
                 from,
                 to,
@@ -147,5 +166,51 @@ impl RenderList {
             self.slot_count
         );
         Ok(())
+    }
+}
+
+impl fmt::Display for RenderList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "render_list({}, slots = {}) {{",
+            self.input, self.slot_count
+        )?;
+        for op in &self.ops {
+            match op {
+                Op::Pointwise {
+                    from,
+                    to,
+                    operations,
+                } => {
+                    write!(f, "  {to} = pointwise [")?;
+                    for (index, operation) in operations.iter().enumerate() {
+                        if index != 0 {
+                            write!(f, ", ")?;
+                        }
+                        match operation {
+                            PointwiseOp::Brightness(value) => write!(f, "brightness({value:?})")?,
+                            PointwiseOp::Saturation(value) => write!(f, "saturation({value:?})")?,
+                        }
+                    }
+                    writeln!(f, "] {from}")?;
+                }
+                Op::Merge { fg, bg, to, mode } => {
+                    writeln!(f, "  {to} = merge.{mode} {bg}, {fg}")?;
+                }
+                Op::Mix { base, from, to } => {
+                    write!(f, "  {to} = mix base {base}, branches [")?;
+                    for (index, branch) in from.iter().enumerate() {
+                        if index != 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{branch}")?;
+                    }
+                    writeln!(f, "]")?;
+                }
+            }
+        }
+        writeln!(f, "  ret {}", self.output)?;
+        write!(f, "}}")
     }
 }

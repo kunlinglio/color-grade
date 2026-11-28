@@ -1,17 +1,29 @@
 mod scheduler;
+use rayon::ThreadPool;
 pub use scheduler::{FrameStream, Scheduler};
 mod render_list;
 pub use render_list::{BlendMode, Op, PointwiseOp, RenderList, Slot};
 mod render_backend;
 pub use render_backend::{BackendFrame, RenderBackend, ScopeGraph};
-mod scalar_backend;
-pub use scalar_backend::ScalarBackend;
+mod cpu_backend;
+mod cpu_color;
 mod cpu_kernel;
+mod scalar_backend;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use image::{DynamicImage, ImageDecoder, RgbaImage};
+
+pub fn new_backend(thread_pool: Arc<ThreadPool>) -> Arc<dyn RenderBackend> {
+    if cfg!(feature = "backend-cpu") {
+        Arc::new(cpu_backend::CPUBackend::new(thread_pool))
+    } else {
+        let _ = thread_pool;
+        Arc::new(scalar_backend::ScalarBackend::new())
+    }
+}
 
 /// A Frame only for UI usage.
 /// Following GPUI requirement, we use bgra inside.
@@ -22,6 +34,14 @@ pub struct RenderedFrame {
 }
 
 impl RenderedFrame {
+    pub(super) fn new(width: usize, height: usize) -> Self {
+        let bgra = vec![0u8; width * height * 4];
+        RenderedFrame {
+            width,
+            height,
+            bgra,
+        }
+    }
     pub fn to_image(&self) -> RgbaImage {
         image::RgbaImage::from_raw(self.width as u32, self.height as u32, self.bgra.clone())
             .unwrap()
@@ -90,7 +110,7 @@ impl DecodedImage {
         })
     }
     /// Return (width, height)
-    pub fn _size(&self) -> (usize, usize) {
+    pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 }
