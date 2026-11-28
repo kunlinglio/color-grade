@@ -6,6 +6,7 @@ mod render_backend;
 pub use render_backend::{BackendFrame, RenderBackend, ScopeGraph};
 mod scalar;
 pub use scalar::ScalarBackend;
+mod cpu_kernel;
 
 use std::path::PathBuf;
 

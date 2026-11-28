@@ -24,6 +24,9 @@ pub struct Monitor {
 
 enum FrameState {
     NoSession,
+    /// FIXME: Now we do not store the loading media, so if user open one media and
+    ///        open another media before it loaded, the loading icon will be covered
+    ///        untile second media decoded. That's not correct.
     Loading,
     Ready {
         frame: Arc<RenderImage>,
